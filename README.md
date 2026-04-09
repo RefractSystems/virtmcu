@@ -77,7 +77,11 @@ qenode/
 ├── docs/
 │   └── ARCHITECTURE.md         # Deep-dive: comparisons, pillars, timing, prior art, SystemC
 │
-├── Makefile                    # make setup / build / run / venv / test
+├── tutorial/
+│   ├── lesson1-dynamic-machines/ # Educational content for Phase 1
+│   └── lesson2-dynamic-plugins/  # Educational content for Phase 2
+│
+├── Makefile                    # make setup / build / run / test-integration / venv / test
 └── requirements.txt            # qemu.qmp, robotframework, lark, eclipse-zenoh
 ```
 
@@ -89,6 +93,8 @@ qenode/
 Sections 2–3 cover QEMU vs Renode and the four implementation pillars.
 Section 7 covers the MuJoCo time master design. Section 8 covers prior art.
 
+**Tutorials**: If you want to understand how QEMU builds the machine dynamically from a Device Tree, start with `tutorial/lesson1-dynamic-machines/README.md`.
+
 **Writing a new peripheral**: Copy `hw/dummy/dummy.c`, rename, implement MMIO ops.
 Add an entry in `hw/meson.build`. Run `make build` then:
 ```bash
@@ -99,6 +105,18 @@ Add an entry in `hw/meson.build`. Run `make build` then:
 ```bash
 source .venv/bin/activate
 python -m tools.repl2qemu path/to/board.repl --out-dtb board.dtb --print-cmd
+```
+
+**Probing the Object Model (Debugging)**:
+You can interactively dump and inspect the running QEMU Object Model (QOM) tree to verify your Device Trees and Plugins.
+First, launch QEMU with the QMP socket enabled:
+```bash
+./scripts/run.sh -M arm-generic-fdt ... -qmp unix:qmp.sock,server,nowait
+```
+Then, use the probe tool:
+```bash
+python3 tools/qmp_probe.py tree
+python3 tools/qmp_probe.py get /machine/peripheral-anon/device[0] realized
 ```
 
 **Running with FirmwareStudio** (external clock, Phase 7+):
@@ -157,8 +175,8 @@ See [`PLAN.md`](PLAN.md) for the full phased checklist.
 | Phase | Description | Status |
 |-------|-------------|--------|
 | 0 | Repository setup, documentation | **Done** |
-| 1 | QEMU build with arm-generic-fdt patches | In progress |
-| 2 | Dynamic QOM plugin infrastructure | Not started |
+| 1 | QEMU build with arm-generic-fdt patches | **Done** |
+| 2 | Dynamic QOM plugin infrastructure | **Done** |
 | 3 | repl2qemu parser (.repl → .dtb + QEMU CLI) | Not started |
 | 4 | Robot Framework QMP library | Not started |
 | 5 | Co-simulation bridge (Verilated from Renode / SystemC) | Deferred |

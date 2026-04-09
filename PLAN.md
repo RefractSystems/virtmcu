@@ -9,6 +9,33 @@ instantiation, .repl parsing, and Robot Framework test parity.
 
 ---
 
+## Educational Content (Tutorials) Mandate
+
+**For every completed phase, a corresponding tutorial lesson MUST be added.**
+
+**Tutorial Guidelines:**
+- **Audience:** Computer Science graduate students, researchers, and engineers.
+- **Assumed Knowledge:** Solid CS background, but *no* deep computer architecture or low-level emulator internals experience.
+- **Style & Structure:** 
+  - Always explain terminology clearly upfront.
+  - Provide step-by-step, hands-on lessons with reproducible code (e.g., Makefiles, source code).
+  - Teach *practical skills* including how to use tools (like GDB, pytest, or dtc) and how to debug crashes or faults.
+  - Explain the *internals* (how and why it works inside QEMU/qenode) so it's not just a black box.
+
+---
+
+## Regression Testing Mandate
+
+**For every completed phase, an automated integration test MUST be added to prevent future regressions.**
+
+**Testing Guidelines:**
+- **Location:** Place tests in `test/phaseX/smoke_test.sh`. The test must be executable via bash.
+- **Documentation:** Every script and supplementary file (like Python helpers) must be well-documented with header comments explaining *what* it tests and *how*.
+- **Automation:** The root `Makefile` provides a `make test-integration` target. It automatically finds and runs all `test/*/smoke_test.sh` scripts sequentially. If any fail, the command aborts. 
+- **Validation Requirement:** Never mark a Phase complete in this file until its features are covered by an automated test that passes `make test-integration`.
+
+---
+
 ## Phase 0 — Repository Setup ✅
 
 **Status**: Done
@@ -24,7 +51,7 @@ instantiation, .repl parsing, and Robot Framework test parity.
 
 ---
 
-## Phase 1 — QEMU Build with arm-generic-fdt ⬜
+## Phase 1 — QEMU Build with arm-generic-fdt ✅
 
 **Goal**: A working QEMU binary on Linux with `--enable-modules` and the arm-generic-fdt
 machine type. Validates that the patch series applies cleanly and FDT-based boot works.
@@ -35,7 +62,7 @@ machine type. Validates that the patch series applies cleanly and FDT-based boot
 - `qemu-system-arm -device help` lists `arm-generic-fdt` as a valid machine.
 
 ### Tasks
-- [ ] **1.1** Write `scripts/setup-qemu.sh`:
+- [x] **1.1** Write `scripts/setup-qemu.sh`:
   - Confirm QEMU is loaded in `third_party/qemu` and at v10.2.92 / 11.0.0-rc2
   - Apply the 33-patch arm-generic-fdt series from local mailbox `patches/arm-generic-fdt-v3.mbx` via `git am --3way`
   - Apply the libqemu external time master patch via `python3 patches/apply_libqemu.py`
@@ -44,20 +71,21 @@ machine type. Validates that the patch series applies cleanly and FDT-based boot
       --target-list=arm-softmmu,arm-linux-user --prefix=$(pwd)/install`
   - Build: `make -j$(nproc)`
 
-- [ ] **1.2** Write a minimal `test/phase1/minimal.dts` for the arm-generic-fdt machine:
+- [x] **1.2** Write a minimal `test/phase1/minimal.dts` for the arm-generic-fdt machine:
   - Single Cortex-A15 CPU, 128 MB RAM, PL011 UART at 0x09000000
   - Compile: `dtc -I dts -O dtb -o minimal.dtb minimal.dts`
 
-- [ ] **1.3** Write `scripts/run.sh` skeleton:
+- [x] **1.3** Write `scripts/run.sh` skeleton:
   - Accepts `--dtb`, `--kernel`, `--machine` args
   - Sets `QEMU_MODULE_DIR` to the library output directory
   - Execs `qemu-system-arm` with those environment variables
 
-- [ ] **1.4** Smoke-test: boot the minimal DTB, verify UART output reaches host terminal.
+- [x] **1.4** Smoke-test: boot the minimal DTB, verify UART output reaches host terminal.
+- [x] **1.5** Write tutorial lesson 1: Dynamic Machines, Device Trees, and Bare-Metal Debugging.
 
 ---
 
-## Phase 2 — Dynamic QOM Plugin Infrastructure ⬜
+## Phase 2 — Dynamic QOM Plugin Infrastructure ✅
 
 **Goal**: Compile a minimal out-of-tree QOM peripheral as a `.so`, load it into QEMU
 via native module discovery + `scripts/run.sh`, and confirm the type appears in QOM.
@@ -68,28 +96,27 @@ via native module discovery + `scripts/run.sh`, and confirm the type appears in 
 - `info qom-tree` in QEMU monitor shows `dummy-device` attached.
 
 ### Tasks
-- [ ] **2.1** Write `hw/dummy/dummy.c` — minimal correct QOM SysBusDevice:
+- [x] **2.1** Write `hw/dummy/dummy.c` — minimal correct QOM SysBusDevice:
   - Include `qemu/osdep.h` first (always), then `hw/sysbus.h`
   - Use `OBJECT_DECLARE_SIMPLE_TYPE(DummyDevice, DUMMY_DEVICE)`
   - Use `DEFINE_TYPES(dummy_types)` (QEMU 7+ pattern, not `type_register_static`)
   - Implement MMIO read/write stubs (return 0, log access via `qemu_log_mask`)
   - No `#define BUILD_DSO` — this is not a QEMU macro
 
-- [ ] **2.2** Update QEMU module build configuration:
+- [x] **2.2** Update QEMU module build configuration:
   - Add symlink to link `hw/` into QEMU's source tree
   - Add `hw/meson.build` to define `hw_qenode_modules`
   - Output: `hw-qenode-dummy.so` within QEMU's installed `lib/qemu/`
 
-- [ ] **2.3** Verify the native module loading:
-  - `./scripts/run.sh -machine none -device dummy-device`
+- [x] **2.3** Verify the native module loading:
+  - `./scripts/run.sh --dtb test/phase1/minimal.dtb -device dummy-device -nographic`
   - Should auto-load `dummy-device` and print type registration trace, not "unknown device"
 
 - [ ] **2.4** Add a Rust template (optional, lower priority):
   - Crate in `hw/rust-dummy/` using `qemu-plugin` crate or raw FFI
   - Demonstrates the C/Rust peripheral interop story
 
-**Known issue**: QEMU headers require GLib. On some distros you need `libglib2.0-dev`.
-The build script should check for this and provide a clear error message.
+- [x] **2.5** Write tutorial lesson 2: Creating and Loading Dynamic QOM Plugins in C (and optionally Rust).
 
 ---
 
@@ -144,6 +171,9 @@ a valid `.dtb` file that arm-generic-fdt can boot with.
 - [ ] **3.6** Unit tests in `tests/test_parser.py`:
   - Test tokenizer on known .repl snippets
   - Test DTS output for a 3-device platform
+
+- [ ] **3.7** Write tutorial lesson 3: Parsing .repl files and translating to Device Tree structures.
+- [ ] **3.8** Write integration test `test/phase3/smoke_test.sh`: parses a test `.repl`, asserts identical DTB output.
 
 **Needs from Marcin**:
 - Confirm whether you have proprietary `.repl` files to test against edge cases.
@@ -211,6 +241,8 @@ to Phase 7 when slaved modes are active.
   - `Wait For Line On UART  HELLO  timeout=10`
   - Assert pass
 
+- [ ] **4.5** Write tutorial lesson 4: Emulation Test Automation with QMP and Pytest.
+
 ---
 
 ## Phase 5 — Co-Simulation Bridge ⬜ (Deferred)
@@ -249,6 +281,7 @@ Implement after Path B is validated.
       validate end-to-end with one Renode-derived Verilated model.
 - [ ] **5.3** *(P2)* Write `hw/etherbone/etherbone-bridge.c` — MMIO → UDP for FPGA-over-network.
 - [ ] **5.4** Document Path A vs B vs C decision guide (already in `docs/ARCHITECTURE.md` §9).
+- [ ] **5.5** Write tutorial lesson 5: Hardware Co-simulation and SystemC bridges.
 
 ---
 
@@ -380,6 +413,8 @@ tightens; prefer slaved-suspend if the firmware does not need sub-quantum timer 
   - `worlds/*.yml` Docker Compose files reference qenode's patched QEMU image
   - Remove `cyber/src/node_agent.py` — replaced by `hw/zenoh/` native plugin
 
+- [ ] **7.6** Write tutorial lesson 7: External time synchronization and determinism with Zenoh.
+
 ---
 
 ## Phase 6 — Multi-Node Coordination ⬜ (Future)
@@ -402,6 +437,9 @@ delivers a UDP datagram to QEMU's receive path.
   applies the attenuation/distance model, and republishes to RX topics with adjusted
   virtual timestamps
 - Determinism comes from virtual-timestamp ordering, not from UDP delivery timing
+
+### Tasks
+- [ ] **6.1** Write tutorial lesson 6: Deterministic multi-node networking and attenuation modeling.
 
 ---
 

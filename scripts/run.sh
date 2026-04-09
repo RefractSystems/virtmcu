@@ -1,57 +1,90 @@
 #!/usr/bin/env bash
-# run.sh — Launch wrapper for qenode-patched QEMU.
+# ==============================================================================
+# run.sh
 #
-# Sets the module path to the installed QEMU module dir so that
-# `hw-qenode-*.so` plugins are discoverable via -device <name>.
+# This is a wrapper script to launch the locally built QEMU emulator.
+# It automatically sets up the environment (like QEMU_MODULE_DIR) so QEMU
+# can find our custom QOM plugins (.so files) without needing global installation.
 #
 # Usage:
-#   ./scripts/run.sh -M arm-generic-fdt -hw-dtb board.dtb -kernel fw.elf [...]
-#   ./scripts/run.sh --arch aarch64 -M arm-generic-fdt ...   (default: arm)
+#   ./scripts/run.sh [--dtb <path/to/dtb>] [--kernel <path/to/elf>] [other qemu args]
 #
-# Environment variables:
-#   QEMU_SRC    QEMU source / build root (default: third_party/qemu)
-#   QEMU_BUILD  Build directory (default: $QEMU_SRC/build-qenode)
-#   ARCH        arm or aarch64 (default: arm)
+# Arguments:
+#   --dtb     Path to the Device Tree Blob (DTB) file. Appends to the machine string.
+#   --kernel  Path to the ELF kernel/firmware to boot.
+#   --machine Name of the machine to emulate (defaults to arm-generic-fdt).
+#   Any other arguments are passed directly to qemu-system-arm.
+# ==============================================================================
 
-set -euo pipefail
+set -e
 
+# Resolve paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+WORKSPACE_DIR="$(dirname "$SCRIPT_DIR")"
+QEMU_DIR="$WORKSPACE_DIR/third_party/qemu"
+QEMU_BIN="$QEMU_DIR/build-qenode/install/bin/qemu-system-arm"
 
-QEMU_SRC="${QEMU_SRC:-$REPO_ROOT/third_party/qemu}"
-QEMU_BUILD="${QEMU_BUILD:-$QEMU_SRC/build-qenode}"
-ARCH="${ARCH:-arm}"
-
-QEMU_BIN="$QEMU_BUILD/install/bin/qemu-system-$ARCH"
-MODULE_DIR="$QEMU_BUILD/install/lib/qemu"
-
-if [ ! -x "$QEMU_BIN" ]; then
-  echo "ERROR: QEMU binary not found at $QEMU_BIN"
-  echo "       Run ./scripts/setup-qemu.sh first."
-  exit 1
+# Set the QEMU module directory to point to our local build's lib/qemu (or multiarch equivalent)
+# This is crucial for dynamic loading of our custom .so peripherals
+# We explicitly search for .so files to avoid picking up stale .dylib files on macOS cross-builds
+FOUND_SO=$(find "$QEMU_DIR/build-qenode/install" -name "hw-qenode-*.so" -type f 2>/dev/null | head -n1)
+if [ -n "$FOUND_SO" ]; then
+    QEMU_MODULE_DIR=$(dirname "$FOUND_SO")
+else
+    QEMU_MODULE_DIR="$QEMU_DIR/build-qenode/install/lib/qemu"
 fi
 
-# Override arch from --arch flag if present (consumed here, not passed to QEMU)
-ARGS=()
+# Ensure QEMU has been built
+if [ ! -f "$QEMU_BIN" ]; then
+    echo "QEMU binary not found at $QEMU_BIN. Please run setup-qemu.sh first."
+    exit 1
+fi
+
+# Parse arguments
+DTB=""
+KERNEL=""
+MACHINE="arm-generic-fdt"
+EXTRA_ARGS=()
+
 while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --arch)
-      ARCH="$2"
-      QEMU_BIN="$QEMU_BUILD/install/bin/qemu-system-$ARCH"
+  case $1 in
+    --dtb)
+      DTB="$2"
+      shift 2
+      ;;
+    --kernel)
+      KERNEL="$2"
+      shift 2
+      ;;
+    --machine)
+      MACHINE="$2"
       shift 2
       ;;
     *)
-      ARGS+=("$1")
+      EXTRA_ARGS+=("$1") # Collect any remaining arguments to pass to QEMU
       shift
       ;;
   esac
 done
 
-export QEMU_MODULE_DIR="$MODULE_DIR"
+# If a DTB is provided, append it to the machine parameter
+# The arm-generic-fdt machine requires hw-dtb to instantiate devices
+if [ -n "$DTB" ]; then
+    MACHINE="${MACHINE},hw-dtb=${DTB}"
+fi
 
-echo "==> qenode run"
-echo "    binary    : $QEMU_BIN"
-echo "    module dir: $MODULE_DIR"
-echo ""
+# Build the command array
+CMD=("$QEMU_BIN" "-M" "$MACHINE")
 
-exec "$QEMU_BIN" "${ARGS[@]}"
+if [ -n "$KERNEL" ]; then
+    CMD+=("-kernel" "$KERNEL")
+fi
+
+CMD+=("${EXTRA_ARGS[@]}")
+
+# Export QEMU_MODULE_DIR so the QEMU binary picks it up
+export QEMU_MODULE_DIR
+
+echo "Running: ${CMD[@]}"
+# Replace the shell process with the QEMU process
+exec "${CMD[@]}"

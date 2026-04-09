@@ -4,12 +4,13 @@ modules/
 *.dll
 *.dylib
 
-# Docker build cache (not artifacts — those live in the image)
-docker/.env
+# Environment files
+*.env
 
 # Device tree binaries (generated)
 *.dtb
 *.o
+*.elf
 
 # Python
 __pycache__/
@@ -29,10 +30,12 @@ qemu-install/
 output/
 log.html
 report.html
+*.log
 
-# IDEs
+# IDEs and Tools
 .vscode/
 .idea/
+.claude/
 *.swp
 *~
 third_party/
