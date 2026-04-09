@@ -26,7 +26,8 @@ QEMU_BIN="$QEMU_DIR/build-qenode/install/bin/qemu-system-arm"
 
 # Set the QEMU module directory to point to our local build's lib/qemu (or multiarch equivalent)
 # This is crucial for dynamic loading of our custom .so peripherals
-FOUND_SO=$(find "$QEMU_DIR/build-qenode/install" -name "hw-qenode-dummy.*" -type f 2>/dev/null | head -n1)
+# We explicitly search for .so files to avoid picking up stale .dylib files on macOS cross-builds
+FOUND_SO=$(find "$QEMU_DIR/build-qenode/install" -name "hw-qenode-*.so" -type f 2>/dev/null | head -n1)
 if [ -n "$FOUND_SO" ]; then
     QEMU_MODULE_DIR=$(dirname "$FOUND_SO")
 else
