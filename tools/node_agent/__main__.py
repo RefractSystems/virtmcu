@@ -1,19 +1,12 @@
 """
-tools/node_agent — Entry point for the qenode NodeAgent.
+tools/node_agent — DEPRECATED. Will be deleted in Phase 7.
 
-Bridges Zenoh (TimeAuthority) ↔ QEMU Unix socket (libqemu clock).
+This Python node agent is superseded by the native Zenoh QOM plugin (hw/zenoh/).
+The "No Python in the Simulation Loop" mandate requires all clock sync and networking
+to be implemented as native C/Rust QOM modules inside QEMU, not as external Python
+processes. See PLAN.md Phase 7 and docs/ARCHITECTURE.md §7.
 
-Environment variables:
-  ZENOH_ROUTER      Zenoh router address (default: tcp/localhost:7447)
-  NODE_ID           Integer node ID used in Zenoh topics (default: 0)
-  QEMU_CLOCK_SOCKET Path to QEMU's clock Unix socket (default: /tmp/qemu-clock.sock)
-  CLOCK_MODE        standalone | slaved  (default: standalone)
-                    standalone: QEMU runs free — node agent does NOT advance the clock.
-                    slaved: clock is advanced by TimeAuthority messages over Zenoh.
-
-Usage:
-  python3 -m tools.node_agent
-  CLOCK_MODE=slaved NODE_ID=1 python3 -m tools.node_agent
+This file is kept temporarily as a reference for the wire protocol.
 """
 
 import asyncio

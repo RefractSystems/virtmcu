@@ -45,22 +45,26 @@ qenode/
 ├── PLAN.md                     # Phased task checklist — check here for status
 ├── CONTRIBUTING.md             # Setup, dev workflow, code style
 │
-├── hw/                         # C peripheral models
+├── hw/                         # C peripheral models (native QOM only — no Python)
 │   ├── dummy/dummy.c           # Minimal QOM SysBusDevice — start here
+│   ├── zenoh/                  # [Phase 7] Native Zenoh QOM plugin
+│   │   ├── zenoh-clock.c       # TCG cooperative halt + Zenoh clock sync
+│   │   └── zenoh-netdev.c      # Custom -netdev backend for deterministic multi-node networking
 │   └── meson.build             # Integrates hw/ into QEMU's module build
 │
 ├── tools/
-│   ├── node_agent/             # Bridges Zenoh (MuJoCo TimeAuthority) ↔ QEMU clock socket
-│   │   ├── qemu_clock.py       # Async client for the libqemu wire protocol
-│   │   └── __main__.py         # Entry point; supports standalone / slaved-suspend / slaved-icount
-│   ├── repl2qemu/              # Renode .repl → Device Tree + QEMU CLI
+│   ├── node_agent/             # DEPRECATED — superseded by hw/zenoh/ in Phase 7
+│   │   └── ...                 # Kept as wire-protocol reference only
+│   ├── repl2qemu/              # Renode .repl → Device Tree + QEMU CLI (offline Python tool)
 │   └── testing/
-│       ├── qemu_keywords.robot # Robot Framework resource (Renode keyword replacements)
+│       ├── qemu_keywords.robot # Robot Framework compatibility layer (Renode keyword parity)
+│       ├── test_qmp.py         # pytest primary test suite (recommended for new tests)
 │       └── qmp_bridge.py       # Async QMP helper
 │
 ├── patches/
 │   ├── arm-generic-fdt-v3.mbx  # 33-patch series fetched via b4 (apply with git am)
-│   └── apply_libqemu.py        # Injects the -clocksock external time master extension
+│   └── apply_libqemu.py        # Phase 1-6 stepping stone: injects icount bias socket
+│                               # Superseded by hw/zenoh/zenoh-clock.c in Phase 7
 │
 ├── scripts/
 │   ├── setup-qemu.sh           # Clone QEMU, apply patches, symlink hw/, build
@@ -97,11 +101,20 @@ source .venv/bin/activate
 python -m tools.repl2qemu path/to/board.repl --out-dtb board.dtb --print-cmd
 ```
 
-**Running with FirmwareStudio** (external clock):
+**Running with FirmwareStudio** (external clock, Phase 7+):
+
+The clock synchronization is handled by the native Zenoh QOM plugin (`hw/zenoh/`) which
+compiles into QEMU. No separate Python agent process is needed. The TimeAuthority (running
+in the MuJoCo container) connects directly to QEMU over Zenoh:
 ```bash
-CLOCK_MODE=slaved-suspend NODE_ID=0 python -m tools.node_agent &
+# slaved-suspend (default — full TCG speed, ~95% throughput)
 ./scripts/run.sh -M arm-generic-fdt -hw-dtb board.dtb -kernel firmware.elf \
-    -clocksock /tmp/qemu-clock.sock -icount shift=0,align=off,sleep=off
+    -device zenoh-clock,node=0,router=tcp/localhost:7447
+
+# slaved-icount (exact ns precision — only for sub-quantum hardware timer firmware)
+./scripts/run.sh -M arm-generic-fdt -hw-dtb board.dtb -kernel firmware.elf \
+    -device zenoh-clock,node=0,router=tcp/localhost:7447,mode=icount \
+    -icount shift=0,align=off,sleep=off
 ```
 
 **Docker (CI or Phase 4+ with TCG plugins)**:
@@ -158,16 +171,18 @@ See [`PLAN.md`](PLAN.md) for the full phased checklist.
 
 - **Meson integration, not LD_PRELOAD**: `hw/` is symlinked into QEMU's source tree so
   devices compile as proper QEMU modules with auto-discovery. `-device foo` just works.
-- **Three clock modes**: `standalone` (full speed), `slaved-suspend` (QMP stop/cont,
-  ~95% speed, recommended for FirmwareStudio), `slaved-icount` (exact ns, ~15% speed,
-  only for sub-quantum timer precision). See `docs/ARCHITECTURE.md §5`.
-- **`query-cpus-fast`**: The old `query-cpus` QMP command is deprecated. All QMP code
-  uses `query-cpus-fast`.
+- **No Python in the simulation loop**: All peripherals, clock sync, and networking are
+  native C/Rust QOM modules. Python is offline-only (repl2qemu, pytest). See ADR-003.
+- **Three clock modes**: `standalone` (full speed), `slaved-suspend` (native TCG hook,
+  ~95% speed, recommended), `slaved-icount` (exact ns, ~15% speed, sub-quantum only).
+  Implemented as `hw/zenoh/zenoh-clock.c`, not via external Python QMP. See ADR-001.
+- **Deterministic multi-node**: `hw/zenoh/zenoh-netdev.c` with virtual-timestamped frames,
+  not UDP multicast. See ADR-002.
+- **`query-cpus-fast`**: The old `query-cpus` QMP command is deprecated.
 - **arm-generic-fdt is not upstream**: 33-patch patchew series on QEMU 11.0.0-rc2.
-- **vhost-user is VirtIO-specific**: Cannot back arbitrary MMIO peripherals without a
-  VirtIO transport in the guest.
-- **SystemC peripherals**: Three integration paths — chardev socket adapter (now),
-  Remote Port (Phase 5), qbox (future). See `docs/ARCHITECTURE.md §9`.
+- **SystemC peripherals**: Path B (Remote Port, Phase 5) is primary. Path A requires
+  writing `hw/misc/mmio-socket-bridge.c` first — QEMU does not natively serialize MMIO
+  to sockets. See ADR-005 and `docs/ARCHITECTURE.md §9`.
 
 ---
 

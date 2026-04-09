@@ -148,13 +148,19 @@ a valid `.dtb` file that arm-generic-fdt can boot with.
 
 ## Phase 4 — Robot Framework QMP Library ⬜
 
-**Goal**: A `.robot` resource file that provides Renode-compatible test keywords backed
-by QEMU's QMP protocol, enabling existing Robot Framework test suites to run on QEMU
-with minimal keyword substitution.
+**Goal**: A test automation layer that provides Renode-compatible coverage backed by QEMU's
+QMP protocol. Primary implementation is pytest + `qemu.qmp`; a `.robot` resource file is
+maintained for compatibility with existing Renode test suites.
 
 **Acceptance criteria**:
-- A Robot Framework test that uses `Start Emulation`, `Wait For Line On UART`,
+- A pytest test using `QmpBridge` that calls `Start Emulation`, `Wait For Line On UART`,
   `PC Should Be Equal`, and `Reset Emulation` passes against a running QEMU instance.
+- A Robot Framework test using `qemu_keywords.robot` passes the same scenario.
+
+**Note on timeouts**: In standalone mode QEMU runs at ~real-time so wall-clock timeouts
+work. In `slaved-icount` mode QEMU runs at ~15% speed and wall-clock timeouts become
+incorrect. Virtual-time-aware timeouts (polling `query-cpus-fast` for vtime) are deferred
+to Phase 7 when slaved modes are active.
 
 ### Tasks
 - [ ] **4.1** Write `tools/testing/qmp_bridge.py`:
@@ -162,6 +168,12 @@ with minimal keyword substitution.
   - `connect(socket_path)`, `execute(cmd, args)`, `wait_for_event(event_name)`
   - UART monitoring: connect to QEMU chardev socket, non-blocking readline
   - Use `query-cpus-fast` (NOT deprecated `query-cpus`)
+  - Expose `get_virtual_time_ns()` using accumulated clock advance state (for Phase 7)
+
+- [ ] **4.1b** Write `tools/testing/test_qmp.py` (pytest):
+  - pytest fixtures: `qemu_process`, `qmp_bridge`, `uart_socket`
+  - Test functions mirror the Robot keyword set (same coverage, better debuggability)
+  - This is the **primary** test implementation; Robot keywords are the compatibility layer
 
 - [ ] **4.2** Write `tools/testing/qemu_keywords.robot`:
   - `Start Emulation` → `{"execute": "cont"}`
@@ -203,9 +215,14 @@ Migration means replacing those Renode headers with qenode's Remote Port interfa
 Implement after Path B is validated.
 
 ### Tasks
-- [ ] **5.1** Implement Path A: write `tools/systemc_adapter/` — C++ shim translating
-      QEMU chardev socket messages to SystemC TLM-2.0 `b_transport` calls. Validate
-      with a simple register-file model. *(No Verilated models needed to start.)*
+- [ ] **5.1** Implement Path A prerequisite: write `hw/misc/mmio-socket-bridge.c` — a
+      custom QOM `SysBusDevice` that registers a `MemoryRegion`, intercepts
+      `MemoryRegionOps` read/write via a Unix socket request-response protocol, and
+      forwards them to an external C++ SystemC adapter. QEMU does NOT natively serialize
+      MMIO to chardev sockets — this device is required before Path A is usable.
+      Then write `tools/systemc_adapter/` — C++ shim translating those socket messages
+      to SystemC TLM-2.0 `b_transport` calls. Validate with a simple register-file model.
+      *(No Python daemons. No Verilated models needed to start.)*
 - [ ] **5.2** Implement Path B: strip Renode `IntegrationLibrary` headers from existing
       Verilated models; integrate `libsystemctlm-soc`; write `hw/remote-port/` QOM device;
       validate end-to-end with one Renode-derived Verilated model.
@@ -233,12 +250,13 @@ qenode's job in Phase 7: replace the prototype with production-quality implement
 | Mode | QEMU flag | Performance | Use when |
 |---|---|---|---|
 | `standalone` | (none) | 100% | Development, CI without physics |
-| `slaved-suspend` | `-clocksock` optional | ~95% | FirmwareStudio default — QMP stop/cont at boundaries |
-| `slaved-icount` | `-clocksock -icount shift=0,align=off,sleep=off` | ~15–20% | Sub-quantum timing needed (PWM, hardware timers) |
+| `slaved-suspend` | (none — native plugin) | ~95% | FirmwareStudio default — TB-boundary halt via hw/zenoh/ |
+| `slaved-icount` | `-icount shift=0,align=off,sleep=off` | ~15–20% | Sub-quantum timing needed (PWM, hardware timers) |
 
-Inspired by Qualcomm qbox's `libgssync` suspend/resume pattern:
-`slaved-suspend` uses QMP `stop`/`cont` at quantum boundaries — no icount penalty,
-full TCG speed within each step. The ±1 quantum jitter is irrelevant for control loops.
+Inspired by Qualcomm qbox's `libgssync` cooperative-suspend pattern:
+`slaved-suspend` hooks into the TCG loop at translation-block boundaries — no icount
+penalty, full TCG speed within each step. The ±1 TB jitter is irrelevant for control loops.
+**This is implemented as a native C module, not via external Python QMP commands.**
 
 ### Design: External Time Master Protocol
 
@@ -246,63 +264,82 @@ full TCG speed within each step. The ±1 quantum jitter is irrelevant for contro
 MuJoCo (mj_step)
     → TimeAuthority.step(quantum_ns)
         → Zenoh: GET sim/clock/advance/{node_id}  payload=(delta_ns, mujoco_time_ns)
-            → NodeAgent (Python, runs beside QEMU)
-                → Unix socket: ClockAdvance{delta_ns, mujoco_time_ns}
-                    → QEMU (libqemu patch): qemu_icount_bias += delta_ns
-                    → QEMU runs exactly delta_ns ns of virtual time, then blocks
-                    → QEMU replies: ClockReady{vtime_ns, n_frames} + Ethernet frames
-                ← NodeAgent collects reply + frames
-            ← Zenoh reply: ClockReady + frames
-        ← TimeAuthority routes Ethernet frames between nodes
+            → hw/zenoh/zenoh-clock.c (native C plugin inside QEMU)
+                → Blocks QEMU TCG loop at translation-block boundary
+                → (slaved-icount only) qemu_icount_bias += delta_ns
+                → QEMU runs delta_ns ns of virtual time, then blocks again
+                → Replies: ClockReady{vtime_ns, n_frames}
+            ← Zenoh reply: ClockReady
+        ← TimeAuthority routes Ethernet frames via sim/eth/frame topics
 ```
 
-**icount mode** must be configured: `-icount shift=0,align=off,sleep=off`
-This ensures QEMU advances exactly the requested number of nanoseconds with no drift.
+**slaved-icount** requires: `-icount shift=0,align=off,sleep=off`
+**slaved-suspend** requires no extra flags — the plugin handles halting via TCG hooks.
 
 ### Performance of the External Clock Approach
 
-The stepping protocol adds latency per quantum (typically 1–10 ms of sim time per step):
+The stepping protocol adds overhead per quantum (typically 1–10 ms of sim time per step):
 - Zenoh round-trip (same machine, Unix socket backend): ~10–50 µs
-- QEMU icount advance (no actual CPU execution if delta is small): ~1 µs
-- For a 1 kHz physics loop (1 ms quantums): overhead is < 5% of wall time
+- TCG hook block/resume: ~1 µs
+- For a 1 kHz physics loop (1 ms quantums): stepping overhead is < 5% of wall time
 
-The bottleneck is **not** the clock stepping — it is QEMU executing firmware instructions
-within each quantum. icount mode disables JIT optimisations like TB chaining, so raw
-instruction throughput drops by ~5–10× compared to QEMU's default mode. For typical
-bare-metal firmware (Cortex-A15, 100 MHz effective, simple control loops), this is
-plenty fast enough for 1 kHz and even 10 kHz physics loops.
+**slaved-suspend (default)**: QEMU runs at full TCG speed within each quantum. The only
+penalty is the ~50 µs Zenoh round-trip at quantum boundaries. For a 1 kHz loop that is
+~5% overhead — negligible.
+
+**slaved-icount (sub-quantum precision only)**: icount mode disables TCG translation block
+chaining, reducing raw instruction throughput by ~5–10×. A Cortex-A15 in QEMU delivers
+~100–200 MIPS without icount; ~20–40 MIPS with it. This is still sufficient for 1 kHz
+PID loops (~10 000 instructions/iteration) with 2–4× headroom. At 10 kHz the margin
+tightens; prefer slaved-suspend if the firmware does not need sub-quantum timer precision.
 
 ### Tasks
-- [x] **7.1** Implement `patches/apply_libqemu.py` to systematically inject `-clocksock` support:
-  - Replaces fragile .patch files with AST-aware code injection
-  - Handled by `scripts/setup-qemu.sh`
+- [ ] **7.1** Write `hw/zenoh/zenoh-clock.c` — native QOM device (SysBusDevice):
+  - Links `zenoh-c` (added to QEMU Meson as a `dependency()`)
+  - Declares a Zenoh queryable on `sim/clock/advance/{node_id}` at `realize` time
+  - Installs a QEMU `icount_decr` / `cpu_exit` hook that fires at TB boundaries
+  - In `slaved-suspend`: blocks TCG thread on Zenoh reply, then resumes
+  - In `slaved-icount`: additionally sets `timers_state.qemu_icount_bias`
+  - Compiles as `hw-qenode-zenoh.so` via the existing Meson module system
 
-- [ ] **7.2** Write `tools/node_agent/node_agent.py`:
-  - Production-quality port of FirmwareStudio's `node_agent.py`
-  - Configurable Zenoh router address, node ID, socket path
-  - Handle frame injection (Ethernet frames from TimeAuthority → QEMU)
+- [ ] **7.2** Write `hw/zenoh/zenoh-netdev.c` — custom `-netdev` backend:
+  - Implements `NetClientInfo` with `receive` (host→guest) and `can_receive`
+  - TX path: serializes frame + virtual timestamp → Zenoh publish
+  - RX path: subscribes to incoming frames, buffers by virtual timestamp,
+    injects to guest NIC when vtime is reached
+  - Registered as `-netdev zenoh,id=...,node=...,router=...`
 
-- [ ] **7.3** Write `tools/node_agent/qemu_clock.py`:
-  - Clean abstraction over the Unix socket protocol (`ClockAdvance`/`ClockReady`)
-  - Async (asyncio-compatible)
+- [ ] **7.3** Delete `tools/node_agent/` — superseded by hw/zenoh/
 
 - [ ] **7.4** Integration test: boot minimal firmware, step 1000 × 1 ms, assert
   firmware timestamps are deterministic across two identical runs.
 
 - [ ] **7.5** Replace FirmwareStudio's `cyber/` with a dependency on qenode:
   - `worlds/*.yml` Docker Compose files reference qenode's patched QEMU image
-  - `cyber/src/` → qenode `tools/node_agent/`
+  - Remove `cyber/src/node_agent.py` — replaced by `hw/zenoh/` native plugin
 
 ---
 
 ## Phase 6 — Multi-Node Coordination ⬜ (Future)
 
-**Goal**: Python coordinator script to orchestrate multiple QEMU instances with simulated
-wireless medium (packet loss/latency by distance), replacing Renode's `WirelessMedium`.
+**Goal**: Deterministic multi-node network simulation replacing Renode's `WirelessMedium`,
+implemented as a native Zenoh netdev backend inside QEMU.
 
-- Each QEMU instance: `-netdev socket,id=net0,mcast=230.0.0.1:1234`
-- Coordinator intercepts multicast packets, applies attenuation model, rebroadcasts
-- Determinism achieved by running with `icount` mode and locking virtual time
+**Important**: `-netdev socket,mcast=...` + icount does NOT give determinism. UDP multicast
+delivery is scheduled by the host kernel regardless of QEMU's virtual clock. icount makes
+QEMU's internal instruction counting deterministic but cannot control when the kernel
+delivers a UDP datagram to QEMU's receive path.
+
+**Design**:
+- `hw/zenoh/zenoh-netdev.c` — custom QEMU `-netdev` backend (no Python coordinator):
+  - TX: guest NIC raises DMA → netdev publishes frame to `sim/eth/frame/{node_id}/tx`
+    with embedded virtual timestamp
+  - RX: netdev subscribes `sim/eth/frame/{node_id}/rx`; incoming frames are buffered
+    and injected into the guest NIC only when virtual time reaches the stamped arrival time
+- A lightweight C/Rust coordinator process (not Python) subscribes all TX topics,
+  applies the attenuation/distance model, and republishes to RX topics with adjusted
+  virtual timestamps
+- Determinism comes from virtual-timestamp ordering, not from UDP delivery timing
 
 ---
 
@@ -313,11 +350,13 @@ wireless medium (packet loss/latency by distance), replacing Renode's `WirelessM
 | R1 | arm-generic-fdt patchew series may not apply cleanly to v10.2.92 HEAD | Pin to the exact commit the patchew was submitted against; cherry-pick conflicts manually |
 | R2 | Native module approach fails on some macOS builds | Omit `--enable-plugins` on Darwin natively to bypass GLib symbol conflict |
 | R3 | macOS `.so` loading is broken with `--enable-plugins` | Enforce Linux-only dev environment in CI |
-| R4 | vhost-user Python daemons add IPC latency | Reserve for low-speed peripherals (<1 MHz); profile before using in tight interrupt loops |
+| R4 | Native Zenoh plugin (`hw/zenoh/`) adds `zenoh-c` as a QEMU Meson dependency | Pin zenoh-c version; vendor as Meson `subproject()` to avoid system-library conflicts |
 | R5 | Renode .repl parser has undocumented edge cases | Use Renode source (`~/src/renode`) as ground truth; diff parser output against Renode's own AST |
 | R6 | `arm-generic-fdt` v3 patch series may have changed between patchew submission and merger | Track patchew thread; re-fetch if a v4 series is posted |
 | R7 | icount mode reduces firmware execution speed ~5–10× | Acceptable for control loops ≤10 kHz; profile with `perf` if needed |
 | R8 | FirmwareStudio `libqemu` patch uses placeholder git hashes (aaaa/bbbb) and may not apply | Must be manually rewritten with real context lines against QEMU 11.0.0-rc2 |
+| R9 | `zenoh-c` adds a native dependency to QEMU's Meson build | Pin zenoh-c version in Dockerfile; vendor or wrap as a Meson `subproject()` to avoid system-library conflicts |
+| R10 | TCG cooperative-halt hooks may conflict with future QEMU upstream refactors | Keep hook surface minimal; track QEMU `accel/tcg/` API changes on each upstream bump |
 
 ---
 
@@ -328,3 +367,17 @@ wireless medium (packet loss/latency by distance), replacing Renode's `WirelessM
 - RESD (Renode Sensor Data) format injection
 - Antigravity IDE / agent_memory.json / mcp_servers.json (not project artifacts)
 - `query-cpus` (deprecated — use `query-cpus-fast` only)
+
+## Permanently Rejected Approaches
+
+These were evaluated and will not be revisited unless the stated reasons change.
+See `docs/ARCHITECTURE.md §10` for full rationale.
+
+| Approach | Reason rejected |
+|---|---|
+| Python node_agent for clock sync (QMP stop/cont) | Asynchronous QMP dispatch gives indeterminate virtual-time halt boundaries; OS thread jitter breaks causal consistency (ADR-001) |
+| Python vhost-user daemons for peripherals | ~1–5 µs/call IPC latency; catastrophic at >100 kHz access rates; violates No-Python-in-Loop (ADR-003) |
+| `-netdev socket,mcast=...` for multi-node networking | UDP delivery is OS-scheduled, not gated on virtual time; icount mode does not fix this (ADR-002) |
+| Robot Framework as primary test framework | Wall-clock timeouts break in slaved-icount mode; pytest + qemu.qmp is more debuggable and QEMU-upstream-aligned (ADR-004) |
+| QEMU chardev sockets as native MMIO proxies | QEMU chardev is a byte stream for UARTs only; does not serialize MemoryRegionOps; custom bridge device required (ADR-005) |
+| Full qbox/MINRES SystemC-as-kernel embedding | SystemC dependency is overkill; Zenoh provides equivalent IPC; TCG hook pattern from qbox adopted without the SystemC layer (ADR-001, §8) |

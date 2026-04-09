@@ -19,8 +19,9 @@ Specifically, it provides:
    emits a `.dtb` (Device Tree Blob) + QEMU CLI command string.
 4. **Robot Framework QMP library** — `qemu-keywords.robot` that maps Renode test keywords
    to QEMU Machine Protocol (QMP) JSON commands for CI/CD testing parity.
-5. **vhost-user Python daemons** — Low-speed peripherals (I2C sensors, SPI config regs)
-   implemented as standalone Python processes communicating over Unix sockets.
+5. **Native Zenoh QOM plugin** (`hw/zenoh/`) — C/Rust module compiled into QEMU that links
+   `zenoh-c` directly, hooks into the TCG execution loop for cooperative suspend/resume,
+   and acts as the multi-node network backend. Replaces the Python node_agent entirely.
 
 ---
 
@@ -81,20 +82,25 @@ qenode/
 ├── README.md                  # Human-readable project overview
 ├── Makefile                   # Top-level: delegates to scripts/build.sh
 ├── docs/
-│   ├── ARCHITECTURE.md        # Deep-dive: QEMU vs Renode analysis + target design
+│   ├── ARCHITECTURE.md        # Deep-dive: QEMU vs Renode analysis + target design + ADRs
 │   └── MIGRATION_GUIDE.md     # Step-by-step migration walkthrough per phase
 ├── hw/
-│   └── dummy/
-│       └── dummy.c            # Minimal QOM SysBusDevice — proves .so loading works
+│   ├── dummy/
+│   │   └── dummy.c            # Minimal QOM SysBusDevice — proves .so loading works
+│   └── zenoh/                 # [Phase 7] Native Zenoh QOM plugin
+│       ├── zenoh-clock.c      # TCG cooperative halt + Zenoh clock sync
+│       └── zenoh-netdev.c     # Custom -netdev backend for deterministic multi-node
 ├── tools/
-│   ├── repl2qemu/             # Python package: .repl → .dtb + QEMU CLI
+│   ├── repl2qemu/             # Python package: .repl → .dtb + QEMU CLI (offline only)
 │   │   ├── __init__.py
 │   │   ├── parser.py          # Tokenizer + AST for .repl indent mode
 │   │   ├── fdt_emitter.py     # AST → DTS text → invoke dtc → .dtb
 │   │   └── cli_generator.py   # AST → QEMU CLI argument string
-│   └── testing/
-│       ├── qemu_keywords.robot  # Robot Framework resource: QMP-backed keywords
-│       └── qmp_bridge.py        # Async QMP helper (wraps qemu.qmp library)
+│   ├── testing/               # Python test harness (drives QEMU externally, not inline)
+│   │   ├── qemu_keywords.robot  # Robot Framework compatibility layer
+│   │   └── qmp_bridge.py        # Async QMP helper (wraps qemu.qmp library)
+│   └── node_agent/            # DEPRECATED — superseded by hw/zenoh/ in Phase 7
+│                              # Kept as reference for wire protocol only
 ├── scripts/
 │   ├── setup-qemu.sh          # Clone QEMU, apply patches, symlink hw/, build
 │   └── run.sh                 # Launch wrapper: sets QEMU_MODULE_DIR
@@ -119,8 +125,12 @@ qenode/
 - **vhost-user is VirtIO-specific**: It cannot back arbitrary MMIO peripherals (UART, SPI,
   I2C) without a VirtIO transport in guest firmware. Use it only for GPIO/network devices
   or peripherals where a VirtIO transport already exists in the guest.
-- **co-simulation (Verilator/EtherBone/Remote Port)**: Deferred to Phase 4. Do not implement
-  or reference in Phases 1-3 code.
+- **No Python in the Simulation Loop**: Python is strictly banned from QEMU's execution
+  runtime. No Python daemons, no vhost-user Python backends, no node_agent.py bridging
+  sockets at quantum boundaries. All peripherals, time-sync, and networking must be native
+  C/Rust QOM modules. Python is only permitted for offline tooling (repl2qemu, pytest).
+- **co-simulation (Verilator/EtherBone/Remote Port)**: Deferred to Phase 5. Do not implement
+  or reference in Phases 1-4 code.
 
 ---
 
@@ -158,13 +168,13 @@ is essential for making correct architectural decisions.
 ### The Big Picture
 
 ```
-MuJoCo (physics)  ←→  TimeAuthority (Python)  ←→  NodeAgent (Python)
-                                                         ↕  Unix socket
-                                            QEMU (icount slave mode)
-                                                         ↕  MMIO / QOM
-                                               Firmware (bare-metal C)
-                                                         ↕  IVSHMEM / Zenoh
-                                           Physics sensors & actuators
+MuJoCo (physics)  ←→  TimeAuthority (Python)
+                               ↕  Zenoh
+                       QEMU + hw/zenoh/ plugin  (native C/Rust, no Python middleman)
+                               ↕  TCG cooperative suspend/resume
+                          Firmware (bare-metal C)
+                               ↕  QOM peripheral models
+                       Physics sensors & actuators
 ```
 
 ### Key Architectural Decision: MuJoCo is the Time Master
@@ -176,13 +186,18 @@ exactly `delta_ns` nanoseconds of virtual time and then blocks, waiting for the 
 quantum. This guarantees that physics and firmware are always causally consistent —
 firmware never runs ahead of or behind the physics simulation.
 
-This is implemented via the **libqemu clock-socket patch** (`patches/0001-libqemu-clock-socket.patch`):
-- QEMU opens a Unix socket (`/tmp/qemu-clock.sock`)
-- A local `NodeAgent` Python daemon connects to that socket over Zenoh and forwards
-  `ClockAdvance` payloads from the TimeAuthority
-- The patch manipulates `qemu_icount_bias` to advance virtual time precisely
+This is implemented via a **native Zenoh QOM plugin** (`hw/zenoh/zenoh-clock.c`):
+- The plugin links `zenoh-c` directly inside QEMU — no Python middleman
+- It installs a cooperative hook in QEMU's TCG main loop
+- At each quantum boundary the hook blocks the QEMU thread on a Zenoh `get` to
+  `sim/clock/advance/{node_id}`; QEMU halts exactly at the translation-block boundary
+- TimeAuthority replies with `delta_ns`; the hook resumes the TCG loop
+- For sub-quantum precision (`slaved-icount` mode) the plugin additionally manipulates
+  `timers_state.qemu_icount_bias`; icount must be enabled in this case
 
-**Implication for all QEMU config**: `slaved-suspend` mode works best natively without icount. If using exact timer modes, `-icount shift=0,align=off,sleep=off` must be used.
+**Implication for all QEMU config**: `slaved-suspend` (no icount, TB-boundary halts) is the
+default. `slaved-icount` (`-icount shift=0,align=off,sleep=off`) is reserved for firmware
+that measures intervals shorter than one physics quantum.
 
 ### FirmwareStudio is a POC — Design is Flexible
 
@@ -194,10 +209,10 @@ design changes there. Flag anything that should change when writing Phase 7 code
 | Current POC design | Recommended change | Reason |
 |---|---|---|
 | `apply_patch.py` code-injection approach | `patches/apply_libqemu.py` in qenode (done) | Reproducible, version-controlled, reviewable |
-| `-icount` + `qemu_icount_bias` as the only clock mode | Add `slaved-suspend` (QMP stop/cont) as default | ~5x better performance for typical control loops |
+| `-icount` + `qemu_icount_bias` as the only clock mode | Native Zenoh QOM plugin with TB-boundary cooperative halt (`slaved-suspend`) as default | ~95% free-run speed; no external Python process |
 | IVSHMEM PCI device for all sensor/actuator I/O | QOM peripheral models via arm-generic-fdt | Sensors defined in `.repl`, no hardcoded PCI setup |
 | Hardcoded Cortex-A15 machine | `arm-generic-fdt` + `repl2qemu` | Any board from a `.repl` file |
-| `node_agent.py` embedded in `cyber/src/` | `tools/node_agent/` in qenode | Single implementation, used by all worlds |
+| `node_agent.py` embedded in `cyber/src/` | **Deleted** — replaced by `hw/zenoh/` native plugin | Eliminates Python from the simulation loop entirely |
 | `studio_server.py` coupling MCP to QEMU | Keep MCP as the AI/IDE layer; qenode exposes QMP | Separation of concerns |
 | QEMU 10.2.1 pinned download | qenode-patched 11.0.0-rc2 image from `docker/Dockerfile` | Arm-generic-fdt patches, better APIs |
 
@@ -213,14 +228,16 @@ design changes there. Flag anything that should change when writing Phase 7 code
 
 ### Zenoh as the Federation Bus
 
-The message bus is **Eclipse Zenoh** (`eclipse-zenoh` Python package).
-Key topics (from FirmwareStudio):
-- `sim/clock/advance/{node_id}` — TimeAuthority → NodeAgent: advance by N ns
-- `sim/eth/frame/ta/{node_id}` — TimeAuthority → NodeAgent: inject Ethernet frame
-- `firmware/state` — NodeAgent → UI/API: sensor/actuator data
+The message bus is **Eclipse Zenoh**. The native Zenoh QOM plugin (`hw/zenoh/`) links
+`zenoh-c` directly; Python Zenoh (`eclipse-zenoh`) is used only by the TimeAuthority
+(which stays Python in MuJoCo) and by test tooling. `requirements.txt` includes
+`eclipse-zenoh` for test harness use.
 
-qenode's testing and tooling must support Zenoh. `requirements.txt` includes
-`eclipse-zenoh`.
+Key topics:
+- `sim/clock/advance/{node_id}` — TimeAuthority → hw/zenoh/zenoh-clock.c: advance by N ns
+- `sim/eth/frame/{node_id}/tx` — QEMU hw/zenoh/ → coordinator: outbound Ethernet frame
+- `sim/eth/frame/{node_id}/rx` — coordinator → QEMU hw/zenoh/: inbound frame + delivery vtime
+- `firmware/state` — optional telemetry to UI/API (out of scope for Phases 1-6)
 
 ### Lessons from qbox (Qualcomm) and MINRES
 
@@ -236,19 +253,28 @@ libqemu, which is not in upstream QEMU), but demonstrates the full co-simulation
 The key takeaway: tight SystemC integration is more than we need — our Zenoh-based
 message bus already provides the equivalent of TLM-2.0 transactions over a network.
 
-**What we adopt from qbox**: The suspend/resume approach for `slaved-suspend` mode.
-The implementation: NodeAgent sends QMP `{"execute": "stop"}` before updating sensors,
-updates IVSHMEM/MMIO, then sends `{"execute": "cont"}` to resume. No icount, full speed.
+**What we adopt from qbox**: The cooperative suspend/resume approach for `slaved-suspend`
+mode — specifically the pattern of hooking into the TCG loop at quantum boundaries and
+blocking the QEMU thread until the external scheduler grants permission to advance.
+Unlike qbox (which uses in-process SystemC), our scheduler message arrives via Zenoh,
+so the hook is in a native C module (`hw/zenoh/zenoh-clock.c`) that blocks on a Zenoh
+queryable rather than a SystemC event. This gives the same TB-boundary precision without
+the SystemC dependency.
 
-**What we skip**: Full SystemC/TLM-2.0 embedding. Our Zenoh + Unix socket approach is
-simpler, works across containers/machines, and is sufficient for our use case.
+**What we skip**: External Python QMP stop/cont (too much IPC jitter) and full
+SystemC/TLM-2.0 embedding. Zenoh is language-agnostic, works across containers, and is
+already part of FirmwareStudio's infrastructure.
 
 ### Phase 7 (planned) — FirmwareStudio Integration
 
 Phase 7 will:
-1. Formalize and test the `libqemu-clock-socket` patch (currently a placeholder in FirmwareStudio)
-2. Add a `NodeAgent` class to `tools/` that bridges Zenoh ↔ QEMU Unix socket
-3. Validate end-to-end: MuJoCo step → TimeAuthority → Zenoh → NodeAgent → QEMU → firmware response → sensors → physics
+1. Write `hw/zenoh/zenoh-clock.c` — native QOM device that links `zenoh-c`, hooks the
+   TCG loop, and implements cooperative suspend/resume at quantum boundaries
+2. Write `hw/zenoh/zenoh-netdev.c` — custom `-netdev` backend that publishes/subscribes
+   Ethernet frames over Zenoh with virtual timestamps for deterministic multi-node delivery
+3. Delete `tools/node_agent/` (replaced by the native plugin above)
+4. Validate end-to-end: MuJoCo step → TimeAuthority → Zenoh → hw/zenoh/ plugin → TCG halt
+   → sensor update → resume → firmware response → physics
 
 ---
 
