@@ -39,6 +39,7 @@ machine type. Validates that the patch series applies cleanly and FDT-based boot
   - Confirm QEMU is at `~/src/qemu` and at v10.2.92 / 11.0.0-rc2
   - Apply the 33-patch arm-generic-fdt series from local mailbox `patches/arm-generic-fdt-v3.mbx` via `git am --3way`
   - Apply the libqemu external time master patch via `python3 patches/apply_libqemu.py`
+  - Apply the TCG quantum hook patch via `python3 patches/apply_zenoh_hook.py` (exposes a function pointer in `cpu-exec.c` since QOM devices cannot hook the TCG loop natively)
   - Configure: `../configure --enable-modules --enable-fdt --enable-plugins --enable-debug
       --target-list=arm-softmmu,arm-linux-user --prefix=$(pwd)/install`
   - Build: `make -j$(nproc)`
@@ -311,7 +312,7 @@ tightens; prefer slaved-suspend if the firmware does not need sub-quantum timer 
 - [ ] **7.1** Write `hw/zenoh/zenoh-clock.c` — native QOM device (SysBusDevice):
   - Links `zenoh-c` (added to QEMU Meson as a `dependency()`)
   - Declares a Zenoh queryable on `sim/clock/advance/{node_id}` at `realize` time
-  - Installs a QEMU `icount_decr` / `cpu_exit` hook that fires at TB boundaries
+  - Assigns its blocking routine to the exposed `qenode_tcg_quantum_hook` function pointer (installed by `apply_zenoh_hook.py`). This is required because QEMU exports no dynamic APIs for QOM modules to hook the internal `cpu_exec` loop.
   - Compiles as `hw-qenode-zenoh.so` via the existing Meson module system
 
   **Critical implementation constraint — BQL (Big QEMU Lock):**
