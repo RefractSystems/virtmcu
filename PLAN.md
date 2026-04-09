@@ -9,6 +9,21 @@ instantiation, .repl parsing, and Robot Framework test parity.
 
 ---
 
+## Educational Content (Tutorials) Mandate
+
+**For every completed phase, a corresponding tutorial lesson MUST be added.**
+
+**Tutorial Guidelines:**
+- **Audience:** Computer Science graduate students, researchers, and engineers.
+- **Assumed Knowledge:** Solid CS background, but *no* deep computer architecture or low-level emulator internals experience.
+- **Style & Structure:** 
+  - Always explain terminology clearly upfront.
+  - Provide step-by-step, hands-on lessons with reproducible code (e.g., Makefiles, source code).
+  - Teach *practical skills* including how to use tools (like GDB, pytest, or dtc) and how to debug crashes or faults.
+  - Explain the *internals* (how and why it works inside QEMU/qenode) so it's not just a black box.
+
+---
+
 ## Phase 0 — Repository Setup ✅
 
 **Status**: Done
@@ -54,6 +69,7 @@ machine type. Validates that the patch series applies cleanly and FDT-based boot
   - Execs `qemu-system-arm` with those environment variables
 
 - [x] **1.4** Smoke-test: boot the minimal DTB, verify UART output reaches host terminal.
+- [x] **1.5** Write tutorial lesson 1: Dynamic Machines, Device Trees, and Bare-Metal Debugging.
 
 ---
 
@@ -88,8 +104,7 @@ via native module discovery + `scripts/run.sh`, and confirm the type appears in 
   - Crate in `hw/rust-dummy/` using `qemu-plugin` crate or raw FFI
   - Demonstrates the C/Rust peripheral interop story
 
-**Known issue**: QEMU headers require GLib. On some distros you need `libglib2.0-dev`.
-The build script should check for this and provide a clear error message.
+- [ ] **2.5** Write tutorial lesson 2: Creating and Loading Dynamic QOM Plugins in C (and optionally Rust).
 
 ---
 
@@ -144,6 +159,8 @@ a valid `.dtb` file that arm-generic-fdt can boot with.
 - [ ] **3.6** Unit tests in `tests/test_parser.py`:
   - Test tokenizer on known .repl snippets
   - Test DTS output for a 3-device platform
+
+- [ ] **3.7** Write tutorial lesson 3: Parsing .repl files and translating to Device Tree structures.
 
 **Needs from Marcin**:
 - Confirm whether you have proprietary `.repl` files to test against edge cases.
@@ -211,6 +228,8 @@ to Phase 7 when slaved modes are active.
   - `Wait For Line On UART  HELLO  timeout=10`
   - Assert pass
 
+- [ ] **4.5** Write tutorial lesson 4: Emulation Test Automation with QMP and Pytest.
+
 ---
 
 ## Phase 5 — Co-Simulation Bridge ⬜ (Deferred)
@@ -249,6 +268,7 @@ Implement after Path B is validated.
       validate end-to-end with one Renode-derived Verilated model.
 - [ ] **5.3** *(P2)* Write `hw/etherbone/etherbone-bridge.c` — MMIO → UDP for FPGA-over-network.
 - [ ] **5.4** Document Path A vs B vs C decision guide (already in `docs/ARCHITECTURE.md` §9).
+- [ ] **5.5** Write tutorial lesson 5: Hardware Co-simulation and SystemC bridges.
 
 ---
 
@@ -380,6 +400,8 @@ tightens; prefer slaved-suspend if the firmware does not need sub-quantum timer 
   - `worlds/*.yml` Docker Compose files reference qenode's patched QEMU image
   - Remove `cyber/src/node_agent.py` — replaced by `hw/zenoh/` native plugin
 
+- [ ] **7.6** Write tutorial lesson 7: External time synchronization and determinism with Zenoh.
+
 ---
 
 ## Phase 6 — Multi-Node Coordination ⬜ (Future)
@@ -402,6 +424,9 @@ delivers a UDP datagram to QEMU's receive path.
   applies the attenuation/distance model, and republishes to RX topics with adjusted
   virtual timestamps
 - Determinism comes from virtual-timestamp ordering, not from UDP delivery timing
+
+### Tasks
+- [ ] **6.1** Write tutorial lesson 6: Deterministic multi-node networking and attenuation modeling.
 
 ---
 
