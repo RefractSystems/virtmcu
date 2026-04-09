@@ -685,8 +685,8 @@ without a socket or Python process.
 **Option C — Native Zenoh QOM plugin with TCG cooperative hooks** *(chosen)*
 
 `hw/zenoh/zenoh-clock.c` is a `SysBusDevice` that links `zenoh-c` and:
-1. Installs a callback at TB (translation block) boundaries in the TCG loop
-2. At each quantum boundary, blocks the QEMU thread on a Zenoh queryable reply from TimeAuthority
+1. Leverages a minimal upstream patch (`patches/apply_zenoh_hook.py`) that exports a `qenode_tcg_quantum_hook` function pointer in QEMU's outer `cpu_exec` loop. *Why:* Upstream QEMU exports no dynamic APIs for QOM modules or TCG modules to hook the execution loop natively without patching.
+2. At each quantum boundary, the hook drops the Big QEMU Lock (BQL), blocks the QEMU thread on a Zenoh queryable reply from TimeAuthority, and re-acquires the BQL once awoken.
 3. Resumes the TCG loop when the reply arrives
 4. Optionally sets `qemu_icount_bias` if slaved-icount mode is active
 
