@@ -109,7 +109,7 @@ via native module discovery + `scripts/run.sh`, and confirm the type appears in 
   - Output: `hw-qenode-dummy.so` within QEMU's installed `lib/qemu/`
 
 - [x] **2.3** Verify the native module loading:
-  - `./scripts/run.sh -machine none -device dummy-device`
+  - `./scripts/run.sh --dtb test/phase1/minimal.dtb -device dummy-device -nographic`
   - Should auto-load `dummy-device` and print type registration trace, not "unknown device"
 
 - [ ] **2.4** Add a Rust template (optional, lower priority):

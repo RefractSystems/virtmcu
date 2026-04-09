@@ -40,11 +40,10 @@ build:
 # Launch the emulator using the test DTB and default arguments.
 run:
 	@bash scripts/run.sh \
-	  -M arm-generic-fdt \
+	  $(if $(wildcard test/phase1/minimal.dtb),--dtb test/phase1/minimal.dtb) \
+	  $(if $(wildcard test/phase1/hello.elf),--kernel test/phase1/hello.elf) \
 	  -nographic \
 	  -m 128M \
-	  $(if $(wildcard test/phase1/minimal.dtb),-hw-dtb test/phase1/minimal.dtb,) \
-	  $(if $(wildcard test/phase1/hello.elf),-kernel test/phase1/hello.elf,) \
 	  $(EXTRA_ARGS)
 
 # ------------------------------------------------------------------------------
