@@ -112,7 +112,7 @@ via native module discovery + `scripts/run.sh`, and confirm the type appears in 
   - `./scripts/run.sh --dtb test/phase1/minimal.dtb -device dummy-device -nographic`
   - Should auto-load `dummy-device` and print type registration trace, not "unknown device"
 
-- [ ] **2.4** Add a Rust template (optional, lower priority):
+- [x] **2.4** Add a Rust template (optional, lower priority):
   - Crate in `hw/rust-dummy/` using `qemu-plugin` crate or raw FFI
   - Demonstrates the C/Rust peripheral interop story
 
