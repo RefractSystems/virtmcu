@@ -38,7 +38,7 @@ sudo apt install build-essential libglib2.0-dev ninja-build python3-venv \
 
 ```bash
 # 1. Clone this repo
-git clone https://github.com/virtmcu/virtmcu.git
+git clone https://github.com/RefractSystems/virtmcu.git
 cd virtmcu
 
 # 2. Build QEMU with all patches applied (takes ~5 min)
