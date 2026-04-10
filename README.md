@@ -79,7 +79,8 @@ qenode/
 │
 ├── tutorial/
 │   ├── lesson1-dynamic-machines/ # Educational content for Phase 1
-│   └── lesson2-dynamic-plugins/  # Educational content for Phase 2
+│   ├── lesson2-dynamic-plugins/  # Educational content for Phase 2
+│   └── lesson3-repl2qemu/        # Educational content for Phase 3
 │
 ├── Makefile                    # make setup / build / run / test-integration / venv / test
 └── requirements.txt            # qemu.qmp, robotframework, lark, eclipse-zenoh
@@ -177,7 +178,7 @@ See [`PLAN.md`](PLAN.md) for the full phased checklist.
 | 0 | Repository setup, documentation | **Done** |
 | 1 | QEMU build with arm-generic-fdt patches | **Done** |
 | 2 | Dynamic QOM plugin infrastructure | **Done** |
-| 3 | repl2qemu parser (.repl → .dtb + QEMU CLI) | Not started |
+| 3 | repl2qemu parser (.repl → .dtb + QEMU CLI) | **Done** |
 | 4 | Robot Framework QMP library | Not started |
 | 5 | Co-simulation bridge (Verilated from Renode / SystemC) | Deferred |
 | 6 | Multi-node wireless medium coordinator | Future |
