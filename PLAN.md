@@ -323,7 +323,7 @@ delivers a UDP datagram to QEMU's receive path.
 ### Tasks
 - [x] **6.0** Write `tools/zenoh_coordinator` in Rust using Tokio + Zenoh async API to coordinate virtual time frames.
 - [x] **6.1** Write tutorial lesson 6: Deterministic multi-node networking and attenuation modeling.
-- [ ] **6.2** Update `tools/zenoh_coordinator` to subscribe and route `virtmcu/uart/*` topics, applying virtual time propagation delay for deterministic multi-node serial (Phase 8).
+- [x] **6.2** Update `tools/zenoh_coordinator` to subscribe and route `virtmcu/uart/*` topics, applying virtual time propagation delay for deterministic multi-node serial (Phase 8).
 - [ ] **6.3** Update `tools/zenoh_coordinator` to route SystemC shared medium messages (e.g., CAN bus frames) between nodes (Phase 9).
 
 ---
@@ -468,11 +468,11 @@ tightens; prefer slaved-suspend if the firmware does not need sub-quantum timer 
 **Tasks**:
 - [x] **8.1** **Interactive Echo Firmware**: Write a bare-metal ARM firmware that polls the PL011 UART and echoes characters back to the user.
 - [x] **8.2** **Tutorial Lesson 8**: Document how to connect to virtual UARTs via host sockets (`nc` / `minicom`) and explain the polling vs. interrupt trade-offs.
-- [ ] **8.3** **Deterministic Zenoh Chardev**: Implement `hw/zenoh/zenoh-chardev.c`.
+- [x] **8.3** **Deterministic Zenoh Chardev**: Implement `hw/zenoh/zenoh-chardev.c`.
     - Implements the QEMU `Chardev` class.
     - TX: Publishes bytes to Zenoh with `QEMU_CLOCK_VIRTUAL` timestamps.
     - RX: Buffers bytes in a priority queue and injects them via `QEMUTimer` to guarantee multi-node UART determinism.
-- [ ] **8.4** **Multi-Node UART Test**: Integration test where Node 1 sends a string over UART to Node 2 via the `zenoh_coordinator`, asserting byte-perfect virtual-time delivery.
+- [x] **8.4** **Multi-Node UART Test**: Integration test where Node 1 sends a string over UART to Node 2 via the `zenoh_coordinator`, asserting byte-perfect virtual-time delivery.
 
 ---
 
