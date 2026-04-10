@@ -30,5 +30,22 @@ mmio_bridge_ss = ss.source_set()
 mmio_bridge_ss.add(files('misc/mmio-socket-bridge.c'))
 hw_virtmcu_modules += {'mmio-socket-bridge': mmio_bridge_ss}
 
+# ── rust-dummy ──────────────────────────────────────────────────────────────────
+# A QOM device where the boilerplate is in C but memory operations call into Rust.
+# Demonstrates how to build mixed C/Rust peripherals without full QEMU Rust support.
+rust_dummy_lib = custom_target(
+  'rust_dummy_lib',
+  input: 'rust-dummy/src/lib.rs',
+  output: ['librust_dummy.a', 'rust_dummy_trigger.c'],
+  command: ['sh', '-c', 'rustc --crate-type=staticlib -C panic=abort -O "$1" -o "$2" && echo "" > "$3"', 'sh', '@INPUT@', '@OUTPUT0@', '@OUTPUT1@']
+)
+rust_dummy_ss = ss.source_set()
+rust_dummy_ss.add(files('rust-dummy/rust-dummy.c'))
+rust_dummy_ss.add(rust_dummy_lib[1])
+rust_dummy_ss.add(declare_dependency(
+  link_args: [meson.current_build_dir() / 'librust_dummy.a']
+))
+hw_virtmcu_modules += {'rust-dummy': rust_dummy_ss}
+
 # ── Add new devices above this line ──────────────────────────────────────────
 modules += {'hw-virtmcu': hw_virtmcu_modules}
