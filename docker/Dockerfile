@@ -78,6 +78,7 @@ WORKDIR /build
 
 # Copy our patch assets before the long QEMU clone so Docker cache is efficient
 COPY patches/ /build/patches/
+COPY third_party/zenoh-c/ /build/zenoh-c/
 
 # Clone QEMU at the specified ref
 RUN git clone --depth=1 --branch "${QEMU_REF}" "${QEMU_REPO}" qemu \
@@ -134,6 +135,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /opt/virtmcu /opt/virtmcu
+COPY --from=builder /build/zenoh-c/lib/libzenohc.so /opt/virtmcu/lib/
 
 # Install Python dependencies
 COPY requirements.txt /tmp/requirements.txt

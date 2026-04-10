@@ -1,4 +1,4 @@
-zenoh_dir = meson.project_source_root() / '../../third_party/zenoh-c'
+zenoh_dir = meson.project_source_root() / '../zenoh-c'
 zenoh_lib = cc.find_library('zenohc', dirs: zenoh_dir / 'lib')
 zenoh_dep = declare_dependency(
   dependencies: zenoh_lib,
