@@ -56,6 +56,26 @@ Type the following command to inspect the QOM tree:
 
 Look closely at the output. Under `/machine/peripheral-anon`, you should see a `device[0] (dummy-device)`! This proves that our out-of-tree shared library was successfully loaded and instantiated at runtime.
 
+## Part 3: The Rust Interop Story (Hybrid C/Rust Plugins)
+
+While C is the native language of QEMU, writing safe and complex peripheral models is often easier in Rust. Full native Rust support in QEMU is still evolving and can conflict with dynamic module loading. To solve this, `virtmcu` provides a hybrid C/Rust template in `hw/rust-dummy/`.
+
+This approach splits the responsibility:
+1. **The QOM Boilerplate (C)**: `hw/rust-dummy/rust-dummy.c` handles the object-oriented integration with QEMU (TypeInfo, MemoryRegion setup) just like the standard C dummy.
+2. **The Device Logic (Rust)**: `hw/rust-dummy/src/lib.rs` contains a `#[no_std]` Rust library that exports simple `extern "C"` functions (`rust_dummy_read` and `rust_dummy_write`).
+
+### How it builds
+During `make build`, the Meson build system uses a `custom_target` to invoke `rustc`, compiling the Rust code into a static archive (`librust_dummy.a`). Meson then links this archive directly into the `hw-virtmcu-rust-dummy.so` shared module alongside the C boilerplate.
+
+### Testing the Rust Plugin
+You can load the Rust-backed peripheral just like the C one. Because we added a `base-addr` property to the Rust dummy, we can map it directly from the command line:
+
+```bash
+../../scripts/run.sh --dtb ../../test/phase1/minimal.dtb -device rust-dummy,base-addr=0x60000000 -nographic
+```
+
+Any reads from the guest firmware to `0x60000000` will now be safely routed through QEMU's C memory system directly into your Rust functions!
+
 ## Summary
-You have successfully loaded a custom hardware peripheral into QEMU dynamically.
-This decoupled architecture allows you to iterate rapidly on hardware models (e.g., sensors, accelerators) by modifying a single C file and doing a fast incremental rebuild, keeping the core emulator pristine.
+You have successfully loaded custom hardware peripherals into QEMU dynamically, using both pure C and a hybrid C/Rust approach.
+This decoupled architecture allows you to iterate rapidly on hardware models (e.g., sensors, accelerators) by modifying a single file and doing a fast incremental rebuild, keeping the core emulator pristine.
