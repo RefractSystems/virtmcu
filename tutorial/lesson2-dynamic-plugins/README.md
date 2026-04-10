@@ -7,11 +7,11 @@ In traditional QEMU development, adding a new peripheral (like a custom sensor o
 
 For research and firmware testing, this tightly coupled approach is tedious.
 
-## The qenode Solution: Dynamic Plugins
+## The virtmcu Solution: Dynamic Plugins
 QEMU has an obscure feature: **modules**. However, it is primarily used for UI components (like GTK or SDL) and audio backends. 
-In qenode, we exploit this feature to compile our custom peripherals as standalone shared libraries (`.so` on Linux).
+In virtmcu, we exploit this feature to compile our custom peripherals as standalone shared libraries (`.so` on Linux).
 
-We place our C code in the `hw/` directory of the `qenode` repository. A symlink bridges this folder into QEMU's build system. When we run `make build`, QEMU automatically compiles our devices into `.so` files.
+We place our C code in the `hw/` directory of the `virtmcu` repository. A symlink bridges this folder into QEMU's build system. When we run `make build`, QEMU automatically compiles our devices into `.so` files.
 
 ### 🧠 Under the Hood: The QEMU Object Model (QOM)
 To ensure QEMU can dynamically load and instantiate our device, we use the **QEMU Object Model (QOM)**.
@@ -27,13 +27,13 @@ When we run QEMU and pass `-device dummy-device`, QEMU's object system notices t
 
 ## Part 1: Building the Plugin
 
-If you haven't recently, run `make build` from the root of the qenode repository.
+If you haven't recently, run `make build` from the root of the virtmcu repository.
 
 ```bash
 make build
 ```
 
-Behind the scenes, QEMU's `meson` build system sees `hw/dummy/dummy.c` (via the symlink in `third_party/qemu/hw/qenode`), recognizes it as a module, and produces `hw-qenode-dummy.so`.
+Behind the scenes, QEMU's `meson` build system sees `hw/dummy/dummy.c` (via the symlink in `third_party/qemu/hw/virtmcu`), recognizes it as a module, and produces `hw-virtmcu-dummy.so`.
 
 ## Part 2: Loading the Plugin dynamically
 
@@ -56,6 +56,62 @@ Type the following command to inspect the QOM tree:
 
 Look closely at the output. Under `/machine/peripheral-anon`, you should see a `device[0] (dummy-device)`! This proves that our out-of-tree shared library was successfully loaded and instantiated at runtime.
 
+## Part 3: The Rust Interop Story (Hybrid C/Rust Plugins)
+
+While C is the native language of QEMU, writing safe and complex peripheral models is often easier in Rust.  `virtmcu` provides a hybrid C/Rust template in `hw/rust-dummy/`.
+
+### Why not QEMU's native Rust support?
+
+QEMU 10+ ships an official Meson+cargo pipeline for writing device models in Rust (`hw/rust/`).  That pipeline compiles Rust into the **monolithic `qemu-system-*` binary** — it cannot produce standalone `.so` modules.  Our template uses a different approach: `rustc` compiles `src/lib.rs` into a `staticlib`, which Meson links into `hw-virtmcu-rust-dummy.so` alongside the C boilerplate.  This works with `--enable-modules` and keeps your code outside the QEMU source tree.
+
+### How the split works
+
+1. **The QOM Boilerplate (C)** — `hw/rust-dummy/rust-dummy.c`
+   - Registers the `TypeInfo`, initialises the `MemoryRegion`, and handles QEMU's object lifecycle.
+   - Every MMIO access calls `rust_dummy_read()` / `rust_dummy_write()`, forwarding the device's private state pointer (`priv_state`) so Rust can access per-instance data.
+
+2. **The Device Logic (Rust)** — `hw/rust-dummy/src/lib.rs`
+   - A `#[no_std]` crate exporting two `extern "C"` functions.
+   - Receives `priv_state: *mut c_void` as its first argument.  In this demo it is `NULL` (stateless), but the template doc-comments show how to allocate Rust-owned state and pass it through.
+
+### Build flow
+
+```
+rustc --crate-type=staticlib src/lib.rs  →  librust_dummy.a
+                                               ↓ linked into
+                             hw-virtmcu-rust-dummy.so
+```
+
+Meson drives the build via a `custom_target`.  `Cargo.toml` is present for IDE tooling (`rust-analyzer`, `cargo clippy`) but **Meson is authoritative** — running `cargo build` directly does not produce a QEMU-loadable module.
+
+### Internals: the FFI contract
+
+The C side declares:
+```c
+extern uint64_t rust_dummy_read(void *priv_state, uint64_t addr, uint32_t size);
+extern void     rust_dummy_write(void *priv_state, uint64_t addr, uint64_t val, uint32_t size);
+```
+
+The Rust side exports matching symbols:
+```rust
+#[no_mangle]
+pub extern "C" fn rust_dummy_read(_priv_state: *mut c_void, addr: u64, _size: u32) -> u64 {
+    match addr { 0 => 0xdead_beef, _ => 0 }
+}
+```
+
+The `priv_state` parameter is the key to stateful devices.  See the doc-comments in `src/lib.rs` for the full extension pattern using `rust_dummy_init()` and `Box::into_raw`.
+
+### Testing the Rust Plugin
+
+```bash
+../../scripts/run.sh --dtb ../../test/phase1/minimal.dtb \
+    -device rust-dummy,base-addr=0x60000000 \
+    -nographic
+```
+
+Add `-d unimp` to see every MMIO access logged.  Guest reads from `0x60000000` return `0xdeadbeef`.
+
 ## Summary
-You have successfully loaded a custom hardware peripheral into QEMU dynamically.
-This decoupled architecture allows you to iterate rapidly on hardware models (e.g., sensors, accelerators) by modifying a single C file and doing a fast incremental rebuild, keeping the core emulator pristine.
+
+You have successfully loaded custom hardware peripherals into QEMU dynamically, using both pure C and a hybrid C/Rust approach.  This decoupled architecture lets you iterate rapidly on hardware models (sensors, accelerators, custom registers) by editing a single file and doing a fast incremental rebuild, keeping the QEMU emulator core untouched.

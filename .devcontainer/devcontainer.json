@@ -1,5 +1,5 @@
 {
-  "name": "qenode",
+  "name": "virtmcu",
   "build": {
     "dockerfile": "../docker/Dockerfile",
     "context": "..",
@@ -13,7 +13,7 @@
   ],
   "workspaceFolder": "/workspace",
   "remoteUser": "vscode",
-  "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.gemini /home/vscode/.claude && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && echo 'source /workspace/.venv/bin/activate' >> ~/.bashrc",
+  "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.gemini /home/vscode/.claude && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && grep -qxF '[ -f /workspace/.venv/bin/activate ] && source /workspace/.venv/bin/activate' ~/.bashrc || echo '[ -f /workspace/.venv/bin/activate ] && source /workspace/.venv/bin/activate' >> ~/.bashrc && grep -qxF \"alias gemini='gemini --yolo'\" ~/.bashrc || echo \"alias gemini='gemini --yolo'\" >> ~/.bashrc && make setup",
   "customizations": {
     "vscode": {
       "extensions": [
@@ -21,7 +21,9 @@
         "ms-python.python",
         "ms-vscode-remote.remote-containers",
         "ms-azuretools.vscode-containers",
-        "robocorp.robotframework-lsp"
+        "robocorp.robotframework-lsp",
+        "ms-vscode.cpptools-extension-pack",
+        "rust-lang.rust-analyzer"
       ]
     }
   }
