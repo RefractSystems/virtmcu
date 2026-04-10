@@ -466,8 +466,8 @@ tightens; prefer slaved-suspend if the firmware does not need sub-quantum timer 
 **Goal**: Extend deterministic I/O to serial ports and provide a "Human-in-the-Loop" interactive experience.
 
 **Tasks**:
-- [ ] **8.1** **Interactive Echo Firmware**: Write a bare-metal ARM firmware that polls the PL011 UART and echoes characters back to the user.
-- [ ] **8.2** **Tutorial Lesson 8**: Document how to connect to virtual UARTs via host sockets (`nc` / `minicom`) and explain the polling vs. interrupt trade-offs.
+- [x] **8.1** **Interactive Echo Firmware**: Write a bare-metal ARM firmware that polls the PL011 UART and echoes characters back to the user.
+- [x] **8.2** **Tutorial Lesson 8**: Document how to connect to virtual UARTs via host sockets (`nc` / `minicom`) and explain the polling vs. interrupt trade-offs.
 - [ ] **8.3** **Deterministic Zenoh Chardev**: Implement `hw/zenoh/zenoh-chardev.c`.
     - Implements the QEMU `Chardev` class.
     - TX: Publishes bytes to Zenoh with `QEMU_CLOCK_VIRTUAL` timestamps.
