@@ -85,6 +85,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc-arm-none-eabi \
         cargo \
         rustc \
+        strace \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 22 (required for Gemini CLI)
@@ -152,6 +153,10 @@ RUN cd qemu \
 
 # Inject virtmcu_tcg_quantum_hook into cpu-exec.c (required by hw/zenoh/)
 RUN cd qemu && python3 /build/patches/apply_zenoh_hook.py .
+
+# Inject Zenoh netdev/chardev types into QEMU's QAPI schemas (net.json, char.json).
+# These generate NET_CLIENT_DRIVER_ZENOH, NetdevZenohOptions, etc. used by hw/zenoh/.
+RUN cd qemu && python3 /build/patches/apply_zenoh_qapi.py .
 
 # Copy virtmcu hw/ sources and integrate into QEMU's build
 COPY hw/ /build/virtmcu-hw/
