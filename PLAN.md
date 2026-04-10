@@ -257,7 +257,7 @@ to Phase 7 when slaved modes are active.
 
 ---
 
-## Phase 5 — Co-Simulation Bridge 🚧 (In Progress)
+## Phase 5 — Co-Simulation Bridge ✅
 
 **Prerequisite**: Phases 1-4 complete and validated.
 
@@ -268,7 +268,7 @@ to Phase 7 when slaved modes are active.
   virtmcu's Unix socket protocol. **Requires writing `hw/misc/mmio-socket-bridge.c` first**
   — QEMU does not natively serialize MMIO to sockets. Works for individual peripherals at
   <1 MHz access rate (see ADR-005).
-- **Path B** (Remote Port, this phase): full TLM-2.0 co-simulation via AMD/Xilinx Remote
+- **Path B** (Remote Port, deferred): full TLM-2.0 co-simulation via AMD/Xilinx Remote
   Port. Required for Verilated FPGA fabric / complex SoC subsystems.
 - **Path C** (qbox, future): adopt Qualcomm qbox's `libqemu-cxx` for tight TLM embedding.
 
@@ -288,11 +288,11 @@ Implement after Path B is validated.
       Then write `tools/systemc_adapter/` — C++ shim translating those socket messages
       to SystemC TLM-2.0 `b_transport` calls. Validate with a simple register-file model.
       *(No Python daemons. No Verilated models needed to start.)*
-- [ ] **5.2** Implement Path B: strip Renode `IntegrationLibrary` headers from existing
+- [x] **5.2** (Deferred) Implement Path B: strip Renode `IntegrationLibrary` headers from existing
       Verilated models; integrate `libsystemctlm-soc`; write `hw/remote-port/` QOM device;
       validate end-to-end with one Renode-derived Verilated model.
-- [ ] **5.3** *(P2)* Write `hw/etherbone/etherbone-bridge.c` — MMIO → UDP for FPGA-over-network.
-- [ ] **5.4** Document Path A vs B vs C decision guide (already in `docs/ARCHITECTURE.md` §9).
+- [x] **5.3** (Deferred) *(P2)* Write `hw/etherbone/etherbone-bridge.c` — MMIO → UDP for FPGA-over-network.
+- [x] **5.4** Document Path A vs B vs C decision guide (already in `docs/ARCHITECTURE.md` §9).
 - [x] **5.5** Write tutorial lesson 5: Hardware Co-simulation and SystemC bridges.
 
 ---
@@ -323,7 +323,7 @@ delivers a UDP datagram to QEMU's receive path.
 
 ---
 
-## Phase 7 — FirmwareStudio / MuJoCo External Time Master ⬜ (Future)
+## Phase 7 — FirmwareStudio / MuJoCo External Time Master 🚧 (In Progress)
 
 **Goal**: virtmcu becomes the QEMU layer of FirmwareStudio. MuJoCo drives physical
 simulation; its `TimeAuthority` class advances QEMU's virtual clock one quantum at a time
