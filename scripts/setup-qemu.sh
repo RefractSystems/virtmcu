@@ -95,6 +95,7 @@ fi
 cd "$WORKSPACE_DIR"
 python3 patches/apply_zenoh_hook.py third_party/qemu
 python3 patches/apply_zenoh_netdev.py third_party/qemu
+python3 patches/apply_zenoh_chardev.py third_party/qemu
 
 # Phase 7: Fetch Zenoh-C prebuilt library for native QOM plugins
 ZENOHC_VER="1.8.0"
