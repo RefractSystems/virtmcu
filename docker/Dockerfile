@@ -115,14 +115,20 @@ ARG ARCH
 WORKDIR /build
 
 # Install stable Rust via rustup; apt rustc (1.75) may be too old for zenoh-c.
+# Layer is cached as long as the toolchain stage is unchanged.
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
     sh -s -- -y --default-toolchain stable --no-modify-path
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-# Copy our patch assets before the long network ops so Docker cache is efficient
-COPY patches/ /build/patches/
+# Clone QEMU before COPYing local files so that patch/hw changes do not bust
+# this expensive layer. Cache key: QEMU_REF arg.
+RUN git clone --depth=1 --branch "${QEMU_REF}" "${QEMU_REPO}" qemu \
+    && cd qemu \
+    && git submodule update --init --recursive --depth=1
 
 # Build zenoh-c from source and install to /build/zenoh-c.
+# Placed after the QEMU clone (both are network-only) so neither busts the
+# other. Cache key: ZENOH_C_REF arg.
 # meson.build resolves meson.project_source_root()/../zenoh-c → /build/zenoh-c ✓
 RUN git clone --depth=1 --branch "${ZENOH_C_REF}" \
         https://github.com/eclipse-zenoh/zenoh-c.git /build/zenoh-c-src \
@@ -134,10 +140,9 @@ RUN git clone --depth=1 --branch "${ZENOH_C_REF}" \
     && cmake --install /build/zenoh-c-build \
     && rm -rf /build/zenoh-c-src /build/zenoh-c-build
 
-# Clone QEMU at the specified ref
-RUN git clone --depth=1 --branch "${QEMU_REF}" "${QEMU_REPO}" qemu \
-    && cd qemu \
-    && git submodule update --init --recursive --depth=1
+# COPY local files after all network steps so that changes to patches/ or hw/
+# only invalidate layers that actually depend on them.
+COPY patches/ /build/patches/
 
 # Apply arm-generic-fdt v3 patch series
 RUN cd qemu \
