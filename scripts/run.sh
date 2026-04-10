@@ -118,13 +118,20 @@ export QEMU_MODULE_DIR
 
 echo "Running: ${CMD[@]}"
 
-# Execute QEMU and ensure we clean up any temporary DTB files on exit
-# We don't use 'exec' here so we can perform cleanup after QEMU exits
-"${CMD[@]}"
-RET=$?
-
+# If we have a temporary DTB, we must run QEMU as a child process and trap
+# signals to ensure the file is cleaned up.
+# If we have a permanent DTB, we use 'exec' to replace the shell process,
+# which ensures correct PID tracking and signal propagation for callers.
 if [ "$IS_TEMP_DTB" = true ]; then
-    rm -f "$DTB"
+    # Cleanup trap fires on EXIT, INT, and TERM
+    trap 'rm -f "$DTB"' EXIT
+    trap 'rm -f "$DTB"; exit 130' INT
+    trap 'rm -f "$DTB"; exit 143' TERM
+    
+    # Run QEMU as a child
+    "${CMD[@]}"
+    exit $?
+else
+    # Direct execution replaces the shell process
+    exec "${CMD[@]}"
 fi
-
-exit $RET
