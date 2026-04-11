@@ -15,8 +15,8 @@ ASM_PATH="/tmp/virtmcu-p9-$$.S"
 LD_PATH="/tmp/virtmcu-p9-$$.ld"
 
 cleanup() {
-    kill "$QEMU_PID"    2>/dev/null || true
-    kill "$ADAPTER_PID" 2>/dev/null || true
+    kill "${QEMU_PID:-}"    2>/dev/null || true
+    kill "${ADAPTER_PID:-}" 2>/dev/null || true
     rm -f "$SOCK_PATH" "$ADAPTER_LOG" "$QEMU_LOG" \
           "$DTB_PATH" "$DTS_PATH" "$ELF_PATH" "$ASM_PATH" "$LD_PATH"
 }
