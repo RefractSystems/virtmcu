@@ -93,7 +93,7 @@ SC_MODULE(QemuAdapter) {
 
     void keep_alive_thread() {
         while (running) {
-            wait(1, SC_SEC);
+            wait(1000000, SC_SEC);
         }
     }
 
