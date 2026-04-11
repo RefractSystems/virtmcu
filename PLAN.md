@@ -4,7 +4,7 @@
 instantiation, .repl parsing, and Robot Framework test parity.
 
 **Base**: QEMU 11.0.0-rc3 + 33-patch arm-generic-fdt series (patchew 20260402215629)
-**Target arch**: ARM (Cortex-A / Cortex-M) first; RISC-V deferred to Phase 2+
+**Target arch**: ARM (Cortex-A / Cortex-M) complete; RISC-V expansion starting in Phase 11
 **Dev platform**: Linux required (Docker/WSL2 on macOS/Windows)
 
 ---
@@ -501,6 +501,18 @@ tightens; prefer slaved-suspend if the firmware does not need sub-quantum timer 
 
 ---
 
+## Phase 11 — RISC-V Expansion & Framework Maturation
+
+**Goal**: Expand architecture support to RISC-V, resolve technical debt around virtual-time testing, establish Path B co-simulation (Remote Port), and formally migrate the upstream FirmwareStudio repository to use `virtmcu`.
+
+**Tasks**:
+- [ ] **11.1** **RISC-V Machine Generation**: Extend the dynamic machine generation pipeline (`repl2qemu`) and QEMU patches to support RISC-V targets, removing the ARM-only restriction.
+- [ ] **11.2** **Virtual-Time-Aware Timeouts**: Update the Robot Framework QMP library (`qmp_bridge.py`) to poll `query-cpus-fast` for virtual time, replacing wall-clock timeouts for reliable testing in `slaved-icount` mode.
+- [ ] **11.3** **Remote Port Co-Simulation (Path B)**: Implement full TLM-2.0 co-simulation via AMD/Xilinx Remote Port to support Verilated FPGA fabrics and high-bandwidth SoC subsystems.
+- [ ] **11.4** **FirmwareStudio Upstream Migration**: Refactor the parent FirmwareStudio project to delete Python-in-the-loop scripts (`node_agent.py`, `shm_bridge.py`), switch default clock to `slaved-suspend`, and adopt virtmcu's dynamic QEMU 11.0.0-rc3 container image.
+
+---
+
 ## Risks and Open Questions
 
 | # | Risk | Mitigation |
@@ -518,11 +530,10 @@ tightens; prefer slaved-suspend if the firmware does not need sub-quantum timer 
 
 ---
 
-## Deferred / Won't Do (Phase 1-4 scope)
+## Deferred / Won't Do
 
 - Windows support (module loading fundamentally broken on Windows with current QEMU)
-- RISC-V until ARM is validated
-- RESD (Renode Sensor Data) format injection
+- RESD (Renode Sensor Data) format injection (COMPLETED in Phase 10)
 - Antigravity IDE / agent_memory.json / mcp_servers.json (not project artifacts)
 - `query-cpus` (deprecated — use `query-cpus-fast` only)
 
