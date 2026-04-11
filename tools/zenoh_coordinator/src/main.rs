@@ -1,3 +1,27 @@
+/*
+ * virtmcu Zenoh Coordinator
+ *
+ * This Rust daemon replaces the concept of a traditional "WirelessMedium" or
+ * central network switch found in other emulation frameworks (like Renode).
+ *
+ * In a deterministic multi-node simulation, nodes cannot communicate over
+ * standard UDP or TCP sockets because the host OS network stack introduces
+ * non-deterministic latency. Instead, all inter-node communication (Ethernet,
+ * UART, SystemC CAN) flows through Zenoh.
+ *
+ * The Coordinator's role:
+ * 1. Topology Discovery: It dynamically discovers nodes when they publish to
+ *    TX topics (e.g., `sim/eth/frame/node0/tx`).
+ * 2. Causal Ordering: It reads the `delivery_vtime_ns` timestamp from the
+ *    incoming message's header, adds a configurable propagation `delay_ns`,
+ *    and rewrites the timestamp.
+ * 3. Broadcast: It republishes the message to the RX topics of all *other*
+ *    known nodes in the network (e.g., `sim/eth/frame/node1/rx`).
+ *
+ * Because the receiving nodes use `hw/zenoh/zenoh-netdev.c` (or equivalent),
+ * they will buffer the message and deliver it into the guest firmware *only*
+ * when their virtual clocks catch up to the rewritten delivery timestamp.
+ */
 use std::collections::HashSet;
 use clap::Parser;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
