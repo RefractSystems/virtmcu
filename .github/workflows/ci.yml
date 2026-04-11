@@ -75,7 +75,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install --break-system-packages -r requirements.txt
 
       # device-tree-compiler needed by test_fdt_emitter (calls dtc)
       - name: Install dtc
@@ -158,7 +158,7 @@ jobs:
         include:
           # Phases 1–3.5: no Python runtime needed
           - phase: "1"
-            pre: ":"
+            pre: "make -C test/phase1"
           - phase: "2"
             pre: ":"
           - phase: "3"
@@ -167,10 +167,10 @@ jobs:
             pre: ":"
           # Phase 4: pytest + robot run directly (no venv); needs packages on PATH
           - phase: "4"
-            pre: "pip install -r requirements.txt -q"
+            pre: "pip install --break-system-packages -r requirements.txt -q"
           # Phase 8: smoke_test.sh sources .venv, so we pre-create it
           - phase: "8"
-            pre: "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt -q"
+            pre: "make -C test/phase8 && python3 -m venv .venv && .venv/bin/pip install --break-system-packages -r requirements.txt -q"
 
     steps:
       - uses: actions/checkout@v4
@@ -229,7 +229,7 @@ jobs:
             ${{ env.BUILDER_IMAGE }}:${{ github.sha }} \
             bash -c "
               apt-get install -y --no-install-recommends libsystemc-dev 2>/dev/null || true
-              pip install -r requirements.txt -q
+              pip install --break-system-packages -r requirements.txt -q
               bash test/phase5/smoke_test.sh
             "
 
@@ -264,7 +264,7 @@ jobs:
             ${{ env.BUILDER_IMAGE }}:${{ github.sha }} \
             bash -c "
               touch ~/.cargo/env
-              pip install -r requirements.txt -q
+              pip install --break-system-packages -r requirements.txt -q
               bash test/phase6/smoke_test.sh
             "
 
@@ -302,7 +302,7 @@ jobs:
             -e PYTHONPATH=/workspace \
             ${{ env.BUILDER_IMAGE }}:${{ github.sha }} \
             bash -c "
-              pip install -r requirements.txt -q
+              pip install --break-system-packages -r requirements.txt -q
               bash test/phase7/smoke_test.sh
             "
 
@@ -340,7 +340,7 @@ jobs:
             -e PYTHONPATH=/workspace \
             ${{ env.BUILDER_IMAGE }}:${{ github.sha }} \
             bash -c "
-              pip install -r requirements.txt -q
+              pip install --break-system-packages -r requirements.txt -q
               pytest tools/testing/test_qmp.py \
                 -v --tb=short \
                 --junitxml=test-results/pytest-qmp.xml
@@ -386,7 +386,7 @@ jobs:
             -e PYTHONPATH=/workspace \
             ${{ env.BUILDER_IMAGE }}:${{ github.sha }} \
             bash -c "
-              pip install -r requirements.txt -q
+              pip install --break-system-packages -r requirements.txt -q
               robot \
                 --outputdir test-results/robot \
                 --xunit test-results/robot.xml \

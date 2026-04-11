@@ -25,7 +25,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_DIR="$(dirname "$SCRIPT_DIR")"
 QEMU_DIR="$WORKSPACE_DIR/third_party/qemu"
-QEMU_BIN="$QEMU_DIR/build-virtmcu/install/bin/qemu-system-arm"
+QEMU_BIN=$(command -v qemu-system-arm || echo "$QEMU_DIR/build-virtmcu/install/bin/qemu-system-arm")
 
 # Set the QEMU module directory to point to our local build's lib/qemu (or multiarch equivalent)
 # This is crucial for dynamic loading of our custom .so peripherals
@@ -33,6 +33,8 @@ QEMU_BIN="$QEMU_DIR/build-virtmcu/install/bin/qemu-system-arm"
 FOUND_SO=$(find "$QEMU_DIR/build-virtmcu/install" -name "hw-virtmcu-*.so" -type f 2>/dev/null | head -n1)
 if [ -n "$FOUND_SO" ]; then
     QEMU_MODULE_DIR=$(dirname "$FOUND_SO")
+elif [ -d "/opt/virtmcu/lib/qemu" ]; then
+    QEMU_MODULE_DIR="/opt/virtmcu/lib/qemu"
 else
     QEMU_MODULE_DIR="$QEMU_DIR/build-virtmcu/install/lib/qemu"
 fi
