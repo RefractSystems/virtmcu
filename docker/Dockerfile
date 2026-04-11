@@ -155,7 +155,8 @@ COPY patches/ /build/patches/
 RUN cd qemu \
     && git config user.email "virtmcu-build@example.com" \
     && git config user.name "virtmcu" \
-    && git am --3way /build/patches/arm-generic-fdt-v3.mbx
+    && git am --3way /build/patches/arm-generic-fdt-v3.mbx \
+    && sed -i 's/mc->minimum_page_bits = 12;/mc->minimum_page_bits = 12;\n\n    \/* virtmcu: allow all SysBus devices via -device; arm-generic-fdt loads devices from DTB at runtime *\/\n    machine_class_allow_dynamic_sysbus_dev(mc, "sys-bus-device");/' hw/arm/arm_generic_fdt.c
 
 # Inject virtmcu_tcg_quantum_hook into cpu-exec.c (required by hw/zenoh/)
 # hadolint ignore=DL3003
