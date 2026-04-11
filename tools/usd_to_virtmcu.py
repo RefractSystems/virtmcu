@@ -1,4 +1,19 @@
 #!/usr/bin/env python3
+"""
+usd_to_virtmcu.py — Generate C++ address maps from OpenUSD-aligned YAML.
+
+In the cyber-physical bridge (Phase 10), external simulation tools (like the
+MuJoCo bridge or RESD replay) need to know the exact MMIO base addresses of
+the virtual peripherals they are communicating with (e.g., the mmio-socket-bridge).
+
+Instead of hardcoding these addresses in C++ and risking a mismatch with the
+QEMU Device Tree, this tool parses the single source of truth (the YAML board
+description) and emits a C++ header containing `constexpr` base addresses.
+
+Usage:
+    python3 usd_to_virtmcu.py <board.yaml> > board_addresses.hpp
+"""
+
 import sys
 
 import yaml

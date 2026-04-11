@@ -1,3 +1,26 @@
+/*
+ * hw/zenoh/zenoh-netdev.c — Deterministic Multi-Node Ethernet Backend
+ *
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ * This file implements a custom QEMU `-netdev` backend that uses Zenoh as the
+ * transport layer instead of traditional UDP/TCP sockets. This is critical for
+ * deterministic multi-node simulation.
+ *
+ * How it works:
+ * 1. On TX: When the guest NIC sends an Ethernet frame, this backend prefixes
+ *    it with a `ZenohFrameHeader` containing the exact `QEMU_CLOCK_VIRTUAL`
+ *    time. The frame is then published to `sim/eth/frame/{src_node}/tx`.
+ * 2. On RX: A Zenoh subscriber listens for incoming frames. Instead of
+ *    injecting them immediately (which would introduce wall-clock jitter), it
+ *    reads the `delivery_vtime_ns` timestamp from the header. It then arms a
+ *    QEMUTimer to fire at exactly that virtual time. Only when the virtual
+ *    clock reaches the delivery time is the frame injected into the guest NIC
+ *    via `qemu_send_packet`.
+ *
+ * This guarantees that network events are causally ordered by virtual time
+ * across all nodes, regardless of host scheduling or network latency.
+ */
 #include "qemu/osdep.h"
 #include "net/net.h"
 #include "net/clients.h"
