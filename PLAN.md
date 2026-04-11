@@ -476,13 +476,13 @@ tightens; prefer slaved-suspend if the firmware does not need sub-quantum timer 
 
 ---
 
-## Phase 9 — Advanced Co-Simulation: Shared Media (SystemC)
+## Phase 9 — Advanced Co-Simulation: Shared Media (SystemC) ✅
 
 **Goal**: Move beyond simple MMIO registers to modeling complex shared physical mediums (like CAN or SPI) in SystemC with asynchronous interrupt support.
 
 **Tasks**:
-- [ ] **9.1** **Asynchronous IRQ Protocol**: Upgrade `virtmcu_proto.h` and `hw/misc/mmio-socket-bridge.c` to support `IRQ_SET/CLEAR` messages sent from the SystemC adapter back to QEMU.
-- [ ] **9.2** **Multi-threaded SystemC Adapter**: Rewrite `tools/systemc_adapter` to use `std::thread` for socket I/O, preventing the host blocking-calls from freezing the SystemC scheduler.
+- [x] **9.1** **Asynchronous IRQ Protocol**: Upgrade `virtmcu_proto.h` and `hw/misc/mmio-socket-bridge.c` to support `IRQ_SET/CLEAR` messages sent from the SystemC adapter back to QEMU.
+- [x] **9.2** **Multi-threaded SystemC Adapter**: Rewrite `tools/systemc_adapter` to use `std::thread` for socket I/O, preventing the host blocking-calls from freezing the SystemC scheduler.
 - [ ] **9.3** **Educational CAN Model**: Implement a "CAN-lite" controller in SystemC and a `SharedMedium` bus module that handles arbitration and delivery between two QEMU nodes.
 - [ ] **9.4** **Tutorial Lesson 9**: Co-simulating shared buses. Explain how QEMU handles the CPU while SystemC handles the complex timing of the CAN physical layer.
 
