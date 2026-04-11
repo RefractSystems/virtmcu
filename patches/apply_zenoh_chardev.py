@@ -18,6 +18,7 @@ def patch_file(filepath, marker, insertion, after=False):
     with open(filepath, "w") as f:
         f.write(new_content)
 
+
 def main():
     if len(sys.argv) != 2:
         print(f"Usage: {sys.argv[0]} <qemu-source-dir>")
@@ -36,6 +37,7 @@ def main():
             .name = "router",
             .type = QEMU_OPT_STRING,"""
     patch_file(char_c, marker4, insertion4, after=False)
+
 
 if __name__ == "__main__":
     main()
