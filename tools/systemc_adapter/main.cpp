@@ -288,6 +288,9 @@ void RegisterFile::b_transport(tlm::tlm_generic_payload& trans, sc_time& delay) 
 
     if (cmd == tlm::TLM_READ_COMMAND) {
         memcpy(ptr, &regs[reg_idx], len);
+        uint32_t val = 0;
+        memcpy(&val, ptr, len);
+        cout << "[SystemC] Read " << hex << val << " from reg " << dec << reg_idx << " (addr " << adr << ")" << endl;
     } else if (cmd == tlm::TLM_WRITE_COMMAND) {
         uint32_t val = 0;
         memcpy(&val, ptr, len);
