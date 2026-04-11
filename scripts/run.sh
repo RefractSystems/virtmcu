@@ -94,9 +94,19 @@ if [[ "$INPUT_FILE" == *.repl ]]; then
 elif [[ "$INPUT_FILE" == *.yaml ]]; then
     echo "Processing virtmcu YAML platform: $INPUT_FILE"
     DTB=$(mktemp /tmp/virtmcu-XXXXXX.dtb)
+    CLI_FILE=$(mktemp /tmp/virtmcu-XXXXXX.cli)
     IS_TEMP_DTB=true
     # Call our Phase 3.5 translator as a module
-    python3 -m tools.yaml2qemu "$INPUT_FILE" --out-dtb "$DTB"
+    python3 -m tools.yaml2qemu "$INPUT_FILE" --out-dtb "$DTB" --out-cli "$CLI_FILE"
+    if [ -f "$CLI_FILE" ]; then
+        # Read the file line by line into the EXTRA_ARGS array
+        while IFS= read -r line; do
+            if [ -n "$line" ]; then
+                EXTRA_ARGS+=("$line")
+            fi
+        done < "$CLI_FILE"
+        rm "$CLI_FILE"
+    fi
 elif [[ "$INPUT_FILE" == *.dts ]]; then
     echo "Compiling Device Tree Source: $INPUT_FILE"
     DTB=$(mktemp /tmp/virtmcu-XXXXXX.dtb)

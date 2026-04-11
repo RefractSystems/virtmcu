@@ -29,6 +29,7 @@ def write_if_changed(path, content):
     print(f"  wrote {os.path.relpath(path)}")
     return True
 
+
 def patch_file(path, marker, insertion, after=True):
     with open(path) as f:
         content = f.read()
@@ -45,6 +46,7 @@ def patch_file(path, marker, insertion, after=True):
         f.write(content)
     print(f"  patched {os.path.relpath(path)}")
     return True
+
 
 def main():
     if len(sys.argv) != 2:
@@ -87,8 +89,11 @@ extern int (*virtmcu_zenoh_netdev_hook)(const Netdev *netdev, const char *name, 
     # We use a more specific marker to ensure correct placement and indentation
     marker2 = "while (!cpu_handle_interrupt(cpu, &last_tb)) {"
     # Indentation: 12 spaces for the 'if', 16 for the call (while is at 8)
-    insertion2 = "\n            if (virtmcu_tcg_quantum_hook) {\n                virtmcu_tcg_quantum_hook(cpu);\n            }\n"
+    insertion2 = (
+        "\n            if (virtmcu_tcg_quantum_hook) {\n                virtmcu_tcg_quantum_hook(cpu);\n            }\n"
+    )
     patch_file(cpu_exec_c, marker2, insertion2, after=True)
+
 
 if __name__ == "__main__":
     main()

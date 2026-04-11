@@ -50,7 +50,7 @@ def main():
         sys.exit(1)
 
     qemu = os.path.abspath(sys.argv[1])
-    net_json  = os.path.join(qemu, "qapi", "net.json")
+    net_json = os.path.join(qemu, "qapi", "net.json")
     char_json = os.path.join(qemu, "qapi", "char.json")
 
     for p in (net_json, char_json):

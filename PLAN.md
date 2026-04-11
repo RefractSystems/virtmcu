@@ -187,7 +187,7 @@ a valid `.dtb` file that arm-generic-fdt can boot with.
 - [x] **3.5.5** Update `scripts/run.sh`: Added polymorphic support for `--yaml` files.
 - [x] **3.5.6** Added `test/phase3.5/smoke_test.sh`: Verified the YAML pipeline end-to-end.
 - [x] **3.5.7** Updated Tutorial Lesson 3: Added content explaining the YAML format and the OpenUSD Digital Twin vision.
-- [ ] **3.5.8** Update YAML schema and `yaml2qemu.py` to support hardware definitions for the new `zenoh-chardev` (Phase 8 UART) and `mmio-socket-bridge` (Phase 9 SystemC) peripherals.
+- [x] **3.5.8** Update YAML schema and `yaml2qemu.py` to support hardware definitions for the new `zenoh-chardev` (Phase 8 UART) and `mmio-socket-bridge` (Phase 9 SystemC) peripherals.
 
 **Needs from Marcin**:
 - None for this phase.
