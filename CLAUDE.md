@@ -44,6 +44,7 @@ lockstep with the physical world. Specifically, it provides:
 | 8 | Deterministic multi-node UART (zenoh-chardev) | **Done** |
 | 9 | Advanced co-simulation (shared physical media) | **Done** |
 | 10 | Sensor/Actuator Abstraction Layers (SAL/AAL) | **Done** |
+| 11 | RISC-V Expansion & Framework Maturation | To Do |
 
 See `PLAN.md` for the per-task checklist.
 
@@ -73,7 +74,7 @@ See `PLAN.md` for the per-task checklist.
   `--enable-plugins` is NOT included: it conflicts with `--enable-modules` on macOS
   (GLib issue, GitLab #516) and is not needed for the virtmcu module approach.
 
-**Do NOT** target RISC-V until ARM is fully validated. RISC-V expansion is Phase 2+.
+**Phase 11 focus:** RISC-V expansion will now commence as ARM is fully validated.
 
 ---
 
