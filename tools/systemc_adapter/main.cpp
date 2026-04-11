@@ -18,40 +18,21 @@ using namespace sc_core;
 using namespace sc_dt;
 using namespace std;
 
+// Forward declaration
+class QemuAdapter;
+
 // 1. Simple Register File SystemC Module
 SC_MODULE(RegisterFile) {
     tlm_utils::simple_target_socket<RegisterFile> socket;
     uint32_t regs[256];
+    QemuAdapter* adapter;
 
-    SC_CTOR(RegisterFile) : socket("socket") {
+    SC_CTOR(RegisterFile) : socket("socket"), adapter(nullptr) {
         socket.register_b_transport(this, &RegisterFile::b_transport);
         for (int i = 0; i < 256; i++) regs[i] = 0;
     }
 
-    void b_transport(tlm::tlm_generic_payload& trans, sc_time& delay) {
-        tlm::tlm_command cmd = trans.get_command();
-        uint64_t         adr = trans.get_address() / 4;  // byte offset → word index
-        unsigned char*   ptr = trans.get_data_ptr();
-        unsigned int     len = trans.get_data_length();
-
-        uint64_t words_needed = (len + 3) / 4;
-        if (adr + words_needed > 256) {
-            trans.set_response_status(tlm::TLM_ADDRESS_ERROR_RESPONSE);
-            return;
-        }
-
-        if (cmd == tlm::TLM_READ_COMMAND) {
-            memcpy(ptr, &regs[adr], len);
-            cout << "[SystemC] Read " << hex << *(uint32_t*)ptr
-                 << " from reg " << dec << adr << endl;
-        } else if (cmd == tlm::TLM_WRITE_COMMAND) {
-            memcpy(&regs[adr], ptr, len);
-            cout << "[SystemC] Wrote " << hex << *(uint32_t*)ptr
-                 << " to reg " << dec << adr << endl;
-        }
-
-        trans.set_response_status(tlm::TLM_OK_RESPONSE);
-    }
+    void b_transport(tlm::tlm_generic_payload& trans, sc_time& delay);
 };
 
 /*
@@ -73,6 +54,13 @@ public:
     }
 };
 
+class StopEvent : public sc_prim_channel {
+public:
+    StopEvent() : sc_prim_channel(sc_gen_unique_name("stop_event")) {}
+    void notify_from_os_thread() { async_request_update(); }
+    void update() override { sc_stop(); }
+};
+
 SC_MODULE(QemuAdapter) {
     tlm_utils::simple_initiator_socket<QemuAdapter> socket;
     std::string socket_path;
@@ -82,25 +70,22 @@ SC_MODULE(QemuAdapter) {
     bool running;
 
     std::mutex mtx;
+    std::mutex socket_mtx;
     std::condition_variable cv;
     std::queue<mmio_req> req_queue;
 
     bool has_resp;
     sysc_msg resp_msg;
 
-    class StopEvent : public sc_prim_channel {
-    public:
-        StopEvent() : sc_prim_channel(sc_gen_unique_name("stop_event")) {}
-        void notify_from_os_thread() { async_request_update(); }
-        void update() override { sc_stop(); }
-    };
-
     AsyncEvent safe_event;
     StopEvent stop_event;
 
     SC_HAS_PROCESS(QemuAdapter);
 
-    QemuAdapter(sc_module_name name, std::string path) : sc_module(name), socket("socket"), socket_path(path), client_fd(-1), running(true), has_resp(false) {
+    QemuAdapter(sc_module_name name, std::string path) : 
+        sc_module(name), socket("socket"), socket_path(path), 
+        client_fd(-1), running(true), has_resp(false) 
+    {
         SC_THREAD(systemc_thread);
         SC_THREAD(keep_alive_thread);
     }
@@ -109,6 +94,34 @@ SC_MODULE(QemuAdapter) {
         while (running) {
             wait(1, SC_SEC);
         }
+    }
+
+    void trigger_irq(uint32_t irq_num, bool level) {
+        sysc_msg msg;
+        msg.type = level ? SYSC_MSG_IRQ_SET : SYSC_MSG_IRQ_CLEAR;
+        msg.irq_num = irq_num;
+        msg.data = 0;
+        send_msg(msg);
+    }
+
+    void send_msg(const sysc_msg& msg) {
+        std::lock_guard<std::mutex> lock(socket_mtx);
+        if (client_fd >= 0) {
+            writen_sync(client_fd, &msg, sizeof(msg));
+        }
+    }
+
+    bool writen_sync(int fd, const void* buf, size_t len) {
+        const char* p = static_cast<const char*>(buf);
+        while (len > 0) {
+            ssize_t n = ::write(fd, p, len);
+            if (n <= 0) {
+                if (n < 0 && errno == EINTR) continue;
+                return false;
+            }
+            p += n; len -= n;
+        }
+        return true;
     }
 
     void end_of_elaboration() override {
@@ -158,10 +171,7 @@ SC_MODULE(QemuAdapter) {
                     trans.set_command(tlm::TLM_WRITE_COMMAND);
                 }
 
-                // Do the blocking TLM call
                 socket->b_transport(trans, delay);
-
-                // Wait for the simulated delay
                 wait(delay);
 
                 sysc_msg resp = {0};
@@ -208,20 +218,6 @@ SC_MODULE(QemuAdapter) {
                 ssize_t n = ::read(fd, p, len);
                 if (n <= 0) {
                     if (n < 0 && errno == EINTR) continue;
-                    cout << "[SystemC] readn failed: n=" << n << " errno=" << errno << " expected=" << len << endl;
-                    return false;
-                }
-                p += n; len -= n;
-            }
-            return true;
-        };
-
-        auto writen = [](int fd, const void* buf, size_t len) -> bool {
-            const char* p = static_cast<const char*>(buf);
-            while (len > 0) {
-                ssize_t n = ::write(fd, p, len);
-                if (n <= 0) {
-                    if (n < 0 && errno == EINTR) continue;
                     return false;
                 }
                 p += n; len -= n;
@@ -231,8 +227,7 @@ SC_MODULE(QemuAdapter) {
 
         while (running) {
             mmio_req req;
-            if (!readn(client_fd, &req, sizeof(req))) break; // QEMU disconnected or error
-            cout << "[SystemC] Received request." << endl;
+            if (!readn(client_fd, &req, sizeof(req))) break;
 
             {
                 std::lock_guard<std::mutex> lock(mtx);
@@ -240,7 +235,6 @@ SC_MODULE(QemuAdapter) {
                 has_resp = false;
             }
             
-            // Notify SystemC kernel safely from OS thread
             safe_event.notify_from_os_thread();
 
             // Wait for response from SystemC thread
@@ -253,14 +247,12 @@ SC_MODULE(QemuAdapter) {
                 has_resp = false;
             }
 
-            if (!writen(client_fd, &resp, sizeof(resp))) {
-                break;
-            }
+            send_msg(resp);
         }
 
         cout << "[SystemC] OS thread exiting." << endl;
         running = false;
-        safe_event.notify_from_os_thread(); // tell systemc thread to die
+        safe_event.notify_from_os_thread();
         close(client_fd);
         client_fd = -1;
         close(server_fd);
@@ -269,6 +261,34 @@ SC_MODULE(QemuAdapter) {
         stop_event.notify_from_os_thread();
     }
 };
+
+void RegisterFile::b_transport(tlm::tlm_generic_payload& trans, sc_time& delay) {
+    tlm::tlm_command cmd = trans.get_command();
+    uint64_t         adr = trans.get_address() / 4;
+    unsigned char*   ptr = trans.get_data_ptr();
+    unsigned int     len = trans.get_data_length();
+
+    uint64_t words_needed = (len + 3) / 4;
+    if (adr + words_needed > 256) {
+        trans.set_response_status(tlm::TLM_ADDRESS_ERROR_RESPONSE);
+        return;
+    }
+
+    if (cmd == tlm::TLM_READ_COMMAND) {
+        memcpy(ptr, &regs[adr], len);
+    } else if (cmd == tlm::TLM_WRITE_COMMAND) {
+        uint32_t val;
+        memcpy(&val, ptr, len);
+        regs[adr] = val;
+        cout << "[SystemC] Wrote " << hex << val << " to reg " << dec << adr << endl;
+        
+        // Trigger IRQ 0 if writing to reg 255
+        if (adr == 255 && adapter) {
+            adapter->trigger_irq(0, val != 0);
+        }
+    }
+    trans.set_response_status(tlm::TLM_OK_RESPONSE);
+}
 
 int sc_main(int argc, char* argv[]) {
     if (argc < 2) {
@@ -280,8 +300,11 @@ int sc_main(int argc, char* argv[]) {
     QemuAdapter adapter("adapter", argv[1]);
 
     adapter.socket.bind(regfile.socket);
+    regfile.adapter = &adapter;
 
-    sc_start();
-    cout << "[SystemC] sc_main returning." << endl;
+    while (adapter.running) {
+        sc_start(100, SC_MS);
+    }
+    
     return 0;
 }
