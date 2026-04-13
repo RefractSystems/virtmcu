@@ -42,3 +42,6 @@ Standard hardware emulators like QEMU are incredibly fast but relatively rigid: 
 
 *   **[Lesson 11: RISC-V Expansion & Cross-Architecture Simulation](./lesson11-riscv-expansion/README.md)**
     Learn how the virtmcu framework expands beyond ARM to support RISC-V, allowing for heterogeneous multi-node simulations and architecture-agnostic platform descriptions.
+
+*   **[Lesson 11.2: Virtual-Time-Aware Timeouts](./lesson11.2-virtual-time-timeouts/README.md)**
+    Understand why wall-clock timeouts fail in slaved-icount mode and how `QmpBridge` uses `query-replay` icount to switch between virtual-time and wall-clock timeout sources automatically.
