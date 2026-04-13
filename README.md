@@ -147,6 +147,7 @@ virtmcu/
 ## Where to Start
 
 **Read the architecture first**: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+**Read the time management guide**: [`docs/TIME_MANAGEMENT.md`](docs/TIME_MANAGEMENT.md).
 Sections 1–3 cover the design rationale and the five implementation pillars. Section 5
 covers the timing design and BQL constraints. Section 6 covers prior art (qbox, MINRES).
 

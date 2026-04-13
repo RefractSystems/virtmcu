@@ -242,6 +242,8 @@ clock plugins.
 
 ## 5. Timing Design and Performance
 
+> ⏱️ **Note:** For a comprehensive, pedagogical overview of time management in virtmcu—including sequence diagrams, Big QEMU Lock (BQL) mechanics, and test automation timeouts—please read the dedicated [Time Management Guide](TIME_MANAGEMENT.md).
+
 ### Clock Mode Selection
 
 ```
