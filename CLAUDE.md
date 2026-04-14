@@ -332,6 +332,28 @@ Zenoh (rather than SystemC). Same TB-boundary precision, no in-process SystemC.
 
 ---
 
+## Agent Skills & Workflows
+
+This project uses the `addyosmani/agent-skills` suite for Gemini CLI and Claude Code to enforce senior-level engineering discipline.
+
+### Always-On Workflows
+The following workflows are foundational to this project's development lifecycle. Agents should always follow these patterns:
+
+*   **@skills/incremental-implementation**: Deliver changes in atomic, verifiable slices. Never dump large, untested changes into the codebase.
+*   **@skills/code-review-and-quality**: Conduct a multi-axis review (Logic, Security, Performance, Maintainability, Style) before finalizing any change.
+*   **@skills/test-driven-development**: For every bug fix or new feature, provide empirical proof via tests before and after the change.
+
+### Phase-Specific Skills
+Use these specialized skills for targeted tasks:
+*   `/spec` (`spec-driven-development`): Use when requirements are unclear or for new architectural components.
+*   `/plan` (`planning-and-task-breakdown`): Use to decompose complex architectural changes (like Phase 11 RISC-V expansion).
+*   `/simplify` (`code-simplification`): Use during refactoring to maintain clarity in complex C/Rust peripheral models.
+*   `/security` (`security-and-hardening`): Mandatory when modifying Zenoh networking or any logic handling external inputs.
+
+In **Claude Code**, these are available as slash commands (e.g., `/spec`, `/plan`). In **Gemini CLI**, these activate automatically based on task context or can be explicitly invoked.
+
+---
+
 ## Commit / PR Conventions
 
 - Branch: `feature/<phase>-<short-description>`
