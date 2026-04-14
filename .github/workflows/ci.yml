@@ -413,3 +413,26 @@ jobs:
         with:
           name: robot-test-results
           path: test-results/
+
+# ── Tier 4: Runtime Image Verification ───────────────────────────────────────
+
+  verify-runtime:
+    name: Verify Runtime Image
+    needs: [build-qemu]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build runtime image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: runtime
+          tags: virtmcu-runtime:${{ github.sha }}
+          cache-from: type=gha,scope=builder-amd64
+          load: true
+
