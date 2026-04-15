@@ -243,7 +243,8 @@ COPY --from=builder /build/zenoh-c/lib/libzenohc.so /opt/virtmcu/lib/
 # Install Python dependencies using uv
 COPY pyproject.toml /tmp/pyproject.toml
 COPY README.md /tmp/README.md
-RUN cd /tmp && uv pip install --no-cache --system .
+WORKDIR /tmp
+RUN uv pip install --no-cache --system .
 
 # Copy Python tooling
 COPY tools/ /app/tools/
