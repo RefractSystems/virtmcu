@@ -45,14 +45,14 @@ docker run -i --rm -v "$(pwd):/app" "$IMAGE" bash <<'EOF'
     # The mock listens on TCP with multicast disabled — if QEMU ignores router=
     # and uses multicast instead, the GET never reaches it and the test fails.
     export PYTHONPATH="/app:$PYTHONPATH"
-    python3 /app/tests/zenoh_router_mock.py &
+    python3 -u /app/tests/zenoh_router_mock.py &
     ROUTER_PID=$!
 
     sleep 2
 
     # QEMU must run (not -S): the clock-advance handshake requires the vCPU hook
     # to fire at a TB boundary so on_query can complete and send its reply.
-    timeout 30 qemu-system-arm \
+    qemu-system-arm \
         -M arm-generic-fdt,hw-dtb="$PHASE1_DTB" \
         -kernel "$PHASE1_ELF" \
         -device zenoh-clock,router=tcp/127.0.0.1:7447,node=0 \
@@ -65,7 +65,9 @@ docker run -i --rm -v "$(pwd):/app" "$IMAGE" bash <<'EOF'
         echo "✅ Zenoh TCP router connectivity verified"
     else
         echo "❌ Zenoh TCP router connectivity test failed"
+        echo "--- QEMU LOG ---"
         cat /tmp/qemu_zenoh.log
+        echo "----------------"
         kill "$QEMU_PID" 2>/dev/null || true
         exit 1
     fi

@@ -43,19 +43,27 @@ def main() -> None:
     print(f"Waiting for QEMU to register {TOPIC}...")
 
     deadline = time.time() + TIMEOUT_S
+    attempt = 0
     while time.time() < deadline:
+        attempt += 1
         try:
             payload = pack_req(DELTA_NS)
+            print(f"Attempt {attempt}: Sending GET to {TOPIC}...")
             replies = list(session.get(TOPIC, payload=payload, timeout=2.0))
             if replies:
+                print(f"Attempt {attempt}: Received {len(replies)} replies")
                 reply = replies[0]
                 if hasattr(reply, "ok") and reply.ok is not None:
                     vtime = unpack_rep(reply.ok.payload.to_bytes())
                     print(f"Zenoh TCP connectivity test PASSED! vtime={vtime} ns")
                     session.close()
                     sys.exit(0)
+                else:
+                    print(f"Attempt {attempt}: Received reply but it is not 'ok': {reply}")
+            else:
+                print(f"Attempt {attempt}: No replies received")
         except Exception as exc:
-            print(f"Retry: {exc}")
+            print(f"Attempt {attempt}: Exception during GET: {exc}")
 
         time.sleep(0.5)
 
