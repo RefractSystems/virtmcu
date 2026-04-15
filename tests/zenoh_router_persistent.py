@@ -1,7 +1,7 @@
+import time
 
 import zenoh
-import time
-import sys
+
 
 def main():
     config = zenoh.Config()
@@ -15,6 +15,7 @@ def main():
     except KeyboardInterrupt:
         pass
     session.close()
+
 
 if __name__ == "__main__":
     main()
