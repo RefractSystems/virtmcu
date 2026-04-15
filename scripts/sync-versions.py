@@ -34,7 +34,7 @@ def sync():
     if os.path.exists(pendulum_path):
         with open(pendulum_path, "r") as f:
             content = f.read()
-        new_content = re.sub(r'pip install eclipse-zenoh==[^\s]+', f'pip install eclipse-zenoh=={zenoh_ver}', content)
+        new_content = re.sub(r'uv pip install eclipse-zenoh==[^\s]+', f'uv pip install eclipse-zenoh=={zenoh_ver}', content)
         if content != new_content:
             print(f"Updating {pendulum_path} to eclipse-zenoh {zenoh_ver}")
             with open(pendulum_path, "w") as f:

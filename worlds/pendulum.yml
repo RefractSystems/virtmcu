@@ -13,7 +13,7 @@ services:
       ZENOH_ROUTER: tcp/zenoh-router:7447
       PHYSICS_STEP_NS: "1000000"
     command: >
-      sh -c "pip install eclipse-zenoh==1.9.0 -q && python3 -c \"
+      sh -c "curl -LsSf https://astral.sh/uv/install.sh | sh && export PATH=\"/root/.local/bin:\$$PATH\" && uv pip install eclipse-zenoh==1.9.0 --system -q && python3 -c \"
       import zenoh, struct, time;
       s = zenoh.open(zenoh.Config());
       time.sleep(1);
