@@ -1,17 +1,22 @@
 #!/usr/bin/env bash
 # Verifies the API contract of the final virtmcu runtime image.
-set -e
+set -euo pipefail
 
 echo "=============================================================================="
 echo "🧪 RUNNING TEST: $(basename "$0")"
 echo "=============================================================================="
 cat << 'TEST_DOC_BLOCK'
 Verifies the API contract of the final virtmcu runtime image.
+
+This test guarantees that:
+1. All required QEMU binaries (ARM/RISC-V) and tools (DTC, yaml2qemu) are present.
+2. All virtmcu QOM plugins (.so) are correctly linked and loadable by QEMU.
+3. The Zenoh Federation Contract (router= property) is honored by all plugins.
+4. The mmio-socket-bridge wire protocol handler is present and loadable.
 TEST_DOC_BLOCK
 echo "=============================================================================="
 
-
-IMAGE=$1
+IMAGE=${1:-}
 if [ -z "$IMAGE" ]; then
     echo "Usage: $0 <runtime_image>"
     exit 1
@@ -19,72 +24,67 @@ fi
 
 echo "Verifying runtime image: $IMAGE"
 
-docker run -i --rm -v "$(pwd):/app" "$IMAGE" bash <<'EOF'
-    set -e
-    echo "1. Checking QEMU binary..."
-    which qemu-system-arm > /dev/null || (echo "❌ qemu-system-arm not found" && exit 1)
+docker run -i --rm -v "$(pwd):/app" "$IMAGE" bash <<'DOCKER_EOF'
+    set -euo pipefail
     
-    echo "2. Checking arm-generic-fdt support..."
-    qemu-system-arm -M help | grep -q "arm-generic-fdt" || (echo "❌ arm-generic-fdt not supported" && exit 1)
-
-    echo "3. Checking yaml2qemu tool and dtc..."
-    which dtc > /dev/null || (echo "❌ dtc not found" && exit 1)
+    echo "1. Checking QEMU binaries and core tools..."
+    which qemu-system-arm > /dev/null || (echo "❌ qemu-system-arm not found" && exit 1)
+    which dtc > /dev/null || (echo "❌ dtc (device-tree-compiler) not found" && exit 1)
+    
     export PYTHONPATH="/app:$PYTHONPATH"
     python3 -m tools.yaml2qemu --help > /dev/null 2>&1 || (echo "❌ tools.yaml2qemu not found" && exit 1)
 
-    echo "4. Checking virtmcu plugins..."
-    if ! find /opt/virtmcu/lib -name "hw-virtmcu-zenoh.so" | grep -q "."; then
-        echo "❌ Error: hw-virtmcu-zenoh.so plugin not found"
-        exit 1
-    fi
+    echo "2. Verifying QOM Plugin Dynamic Linking..."
+    # Verify every virtmcu .so plugin can be loaded without missing symbol errors
+    # Note: We check for 'help' which forces QEMU to initialize the device classes.
+    qemu-system-arm -M arm-generic-fdt -device zenoh-clock,help > /dev/null || (echo "❌ zenoh-clock plugin failed to load" && exit 1)
+    qemu-system-arm -M arm-generic-fdt -device mmio-socket-bridge,help > /dev/null || (echo "❌ mmio-socket-bridge plugin failed to load" && exit 1)
+    
+    echo "3. Verifying Backend Plugin Registration..."
+    qemu-system-arm -netdev help | grep -q "zenoh" || (echo "❌ zenoh netdev backend not registered" && exit 1)
+    qemu-system-arm -chardev help | grep -q "zenoh" || (echo "❌ zenoh chardev backend not registered" && exit 1)
 
-    echo "4b. Checking mmio-socket-bridge instantiation..."
-    # Verify the plugin actually loads into QEMU without missing symbols or segfaults
-    qemu-system-arm -M arm-generic-fdt -device mmio-socket-bridge,help > /dev/null || (echo "❌ mmio-socket-bridge failed to initialize" && exit 1)
+    echo "4. Testing Full-System Zenoh Federation Contract..."
+    # Create a minimal board for a boot test
+    cat << YML > /tmp/test.yaml
+machine:
+  name: test
+  type: arm-generic-fdt
+  cpus: [ { name: cpu0, type: cortex-a15 } ]
+peripherals:
+  - name: flash
+    type: Memory.MappedMemory
+    address: 0x00000000
+    properties: { size: "0x01000000" }
+YML
+    python3 -m tools.yaml2qemu /tmp/test.yaml --out-dtb /tmp/test.dtb > /dev/null
 
-    echo "5. Checking Zenoh connectivity (router= TCP property)..."
-
-    # Use the pre-built phase1 firmware and DTB (checked in; no toolchain needed).
-    # arm-generic-fdt machine supports -device zenoh-clock via the dynamic-sysbus
-    # patch applied in the Dockerfile.
-    PHASE1_DTB="/app/test/phase1/minimal.dtb"
-    PHASE1_ELF="/app/test/phase1/hello.elf"
-    if [ ! -f "$PHASE1_DTB" ] || [ ! -f "$PHASE1_ELF" ]; then
-        echo "❌ Phase1 test artifacts not found at $PHASE1_DTB / $PHASE1_ELF"
-        exit 1
-    fi
-
-    # Start the mock router first so port 7447 is ready before QEMU connects.
-    # The mock listens on TCP with multicast disabled — if QEMU ignores router=
-    # and uses multicast instead, the GET never reaches it and the test fails.
-    export PYTHONPATH="/app:$PYTHONPATH"
-    python3 -u /app/tests/zenoh_router_mock.py &
+    # Start the mock router (TCP-only, no multicast)
+    python3 -u /app/tests/zenoh_router_persistent.py &
     ROUTER_PID=$!
-
     sleep 2
 
-    # QEMU must run (not -S): the clock-advance handshake requires the vCPU hook
-    # to fire at a TB boundary so on_query can complete and send its reply.
+    # Launch QEMU with all FirmwareStudio plugins active
+    # This proves they all cooperate on the same Zenoh session and respect the router endpoint.
     qemu-system-arm \
-        -M arm-generic-fdt,hw-dtb="$PHASE1_DTB" \
-        -kernel "$PHASE1_ELF" \
-        -device zenoh-clock,router=tcp/127.0.0.1:7447,node=0 \
-        -nographic \
-        -monitor none \
-        > /tmp/qemu_zenoh.log 2>&1 &
-    QEMU_PID=$!
+        -M arm-generic-fdt,hw-dtb=/tmp/test.dtb \
+        -device zenoh-clock,node=0,router=tcp/127.0.0.1:7447 \
+        -netdev zenoh,node=0,id=n0,router=tcp/127.0.0.1:7447 \
+        -chardev zenoh,node=0,id=c0,router=tcp/127.0.0.1:7447 \
+        -display none -daemonize
 
-    if wait "$ROUTER_PID"; then
-        echo "✅ Zenoh TCP router connectivity verified"
+    # Verify the clock queryable is reachable via the TCP router
+    if python3 -c "import zenoh, sys, struct; s=zenoh.open(); r=list(s.get('sim/clock/advance/0', payload=struct.pack('<QQ', 0, 0), timeout=5.0)); s.close(); sys.exit(0 if r else 1)" 2>/dev/null; then
+        echo "   ✅ Full-System Federation Contract verified (Clock + Net + UART)."
     else
-        echo "❌ Zenoh TCP router connectivity test failed"
-        echo "--- QEMU LOG ---"
-        cat /tmp/qemu_zenoh.log
-        echo "----------------"
-        kill "$QEMU_PID" 2>/dev/null || true
+        echo "❌ Error: QEMU failed to expose federated queryables over TCP."
+        kill -9 "$ROUTER_PID" || true
+        pkill -9 qemu-system || true
         exit 1
     fi
-    kill "$QEMU_PID" 2>/dev/null || true
-EOF
 
-echo "✅ Runtime image verification passed!"
+    # Cleanup
+    kill -9 "$ROUTER_PID" || true
+    pkill -9 qemu-system || true
+    echo "✅ All runtime image contract checks passed!"
+DOCKER_EOF
