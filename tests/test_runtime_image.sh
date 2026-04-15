@@ -31,7 +31,16 @@ docker run -i --rm -v "$(pwd):/app" "$IMAGE" bash <<'DOCKER_EOF'
     which qemu-system-arm > /dev/null || (echo "❌ qemu-system-arm not found" && exit 1)
     which dtc > /dev/null || (echo "❌ dtc (device-tree-compiler) not found" && exit 1)
     
-    export PYTHONPATH="/app:${PYTHONPATH:-}"
+    # In 'runtime' image, code is in /app. In 'builder' image, we mount to /workspace.
+    if [ -d "/app/tools" ]; then
+        WS="/app"
+    elif [ -d "/workspace/tools" ]; then
+        WS="/workspace"
+    else
+        echo "❌ Could not find tools directory" && exit 1
+    fi
+
+    export PYTHONPATH="$WS:${PYTHONPATH:-}"
     python3 -m tools.yaml2qemu --help > /dev/null 2>&1 || (echo "❌ tools.yaml2qemu not found" && exit 1)
 
     echo "2. Verifying QOM Plugin Dynamic Linking..."
