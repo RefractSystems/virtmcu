@@ -213,9 +213,10 @@ RUN cd qemu \
 # (used by CI integration jobs that run smoke tests within the builder container).
 ENV PATH="/opt/virtmcu/bin:${PATH}"
 ENV QEMU_MODULE_DIR="/opt/virtmcu/lib/qemu"
-
-# ── Stage 3: runtime ─────────────────────────────────────────────────────────
-FROM ubuntu:24.04 AS runtime
+# ── Stage 3: runtime ──────────────────────────────────────────────────────────
+# Lean: only runtime libs + Python + the installed QEMU binaries.
+# Use toolchain as base to ensure parity with builder environment.
+FROM toolchain AS runtime
 
 LABEL org.opencontainers.image.source=https://github.com/refractsystems/virtmcu
 LABEL org.opencontainers.image.description="virtmcu runtime image — QEMU + Python simulation tools"
@@ -226,24 +227,8 @@ ARG TARGETARCH
 ENV ARCH=arm
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3 \
-        python3-venv \
-        python3-pip \
-        device-tree-compiler \
-        coreutils \
-        libglib2.0-0 \
-        libpixman-1-0 \
-        libslirp0 \
-        libssl3 \
-        ca-certificates \
-        libatomic1 \
-        iproute2 \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/bin/
-
 COPY --from=builder /opt/virtmcu /opt/virtmcu
+
 COPY --from=builder /build/zenoh-c/lib/libzenohc.so /opt/virtmcu/lib/
 
 # Install Python dependencies using uv
