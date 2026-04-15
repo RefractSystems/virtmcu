@@ -501,5 +501,5 @@ jobs:
       - name: Run verification script
         run: |
           chmod +x tests/test_runtime_image.sh
-          ./tests/test_runtime_image.sh virtmcu-runtime:${{ github.sha }}
+          ./tests/test_runtime_image.sh ${{ env.BUILDER_IMAGE }}:${{ github.sha }}
 
