@@ -52,6 +52,18 @@ See `PLAN.md` for the per-task checklist.
 
 ---
 
+## Dependency Versions
+
+**Do not hardcode versions in scripts or new files.** All core dependency versions are centralized in the `VERSIONS` file in the project root. Always read `VERSIONS` to determine the current target for:
+
+- **QEMU version**
+- **Zenoh version** (Zenoh-C for QEMU plugins, `eclipse-zenoh` for Python tools)
+- **arm-generic-fdt patch set version**
+
+*(Python dependencies are managed via `requirements.txt`, but must align with `VERSIONS`)*.
+
+---
+
 ## QEMU Version and Patch Strategy
 
 - **Base**: QEMU 11.0.0-rc3 (tag `v11.0.0-rc3` in `third_party/qemu`)
