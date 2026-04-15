@@ -1,0 +1,16 @@
+# virtmcu Project Dependency Versions
+# Centralized version definitions for build scripts, Docker, and documentation.
+
+# QEMU emulator base
+# Tag v11.0.0-rc3 in https://gitlab.com/qemu-project/qemu.git
+QEMU_VERSION=11.0.0-rc3
+
+# Zenoh federation bus (Zenoh-C and Python eclipse-zenoh)
+# Used for deterministic multi-node networking and clock synchronization.
+ZENOH_VERSION=1.9.0
+
+# ARM Generic FDT patch series
+# 33-patch series enabling FDT-based machine initialization.
+ARM_GENERIC_FDT_PATCH_SET=v3
+
+# Python requirements are managed in requirements.txt (must match ZENOH_VERSION)
