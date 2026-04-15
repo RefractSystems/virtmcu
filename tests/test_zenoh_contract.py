@@ -8,10 +8,12 @@ def get_python_zenoh_version():
     try:
         # Try modern importlib.metadata first (Python 3.8+)
         from importlib.metadata import version
+
         return version("eclipse-zenoh")
     except ImportError:
         try:
             import pkg_resources
+
             return pkg_resources.get_distribution("eclipse-zenoh").version
         except Exception:
             return None
@@ -60,6 +62,7 @@ def test_zenoh_version_contract():
     share the same MAJOR.MINOR version to ensure protocol compatibility.
     """
     import pytest
+
     python_version = get_python_zenoh_version()
 
     # In the runtime image, it's at /opt/virtmcu/lib/libzenohc.so
@@ -116,4 +119,3 @@ if __name__ == "__main__":
     else:
         print("❌ Could not determine one or both versions.")
         sys.exit(1)
-
