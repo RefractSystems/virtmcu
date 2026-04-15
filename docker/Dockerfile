@@ -31,7 +31,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         meson \
         ninja-build \
         python3 \
-        python3-pip \
         python3-venv \
         pkg-config \
         libglib2.0-dev \
@@ -55,6 +54,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         jq \
     && rm -rf /var/lib/apt/lists/*
 
+# Install uv for fast Python package management
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/bin/
+
 # ── Stage 1: devenv ───────────────────────────────────────────────────────────
 # Devcontainer image only. MCR base provides the vscode user + sudo setup.
 # The workspace is mounted at runtime — nothing from the repo is baked in here.
@@ -75,7 +77,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         meson \
         ninja-build \
         python3 \
-        python3-pip \
         python3-venv \
         pkg-config \
         libglib2.0-dev \
@@ -99,6 +100,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         gh \
         jq \
     && rm -rf /var/lib/apt/lists/*
+
+# Install uv for fast Python package management
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/bin/
 
 # Install Node.js 24 (required for Gemini CLI)
 RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
@@ -209,9 +213,10 @@ RUN cd qemu \
 # (used by CI integration jobs that run smoke tests within the builder container).
 ENV PATH="/opt/virtmcu/bin:${PATH}"
 ENV QEMU_MODULE_DIR="/opt/virtmcu/lib/qemu"
-
-# ── Stage 3: runtime ─────────────────────────────────────────────────────────
-FROM ubuntu:24.04 AS runtime
+# ── Stage 3: runtime ──────────────────────────────────────────────────────────
+# Lean: only runtime libs + Python + the installed QEMU binaries.
+# Use toolchain as base to ensure parity with builder environment.
+FROM toolchain AS runtime
 
 LABEL org.opencontainers.image.source=https://github.com/refractsystems/virtmcu
 LABEL org.opencontainers.image.description="virtmcu runtime image — QEMU + Python simulation tools"
@@ -222,23 +227,14 @@ ARG TARGETARCH
 ENV ARCH=arm
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3 \
-        python3-pip \
-        device-tree-compiler \
-        coreutils \
-        libglib2.0-0 \
-        libpixman-1-0 \
-        libslirp0 \
-        iproute2 \
-    && rm -rf /var/lib/apt/lists/*
-
 COPY --from=builder /opt/virtmcu /opt/virtmcu
+
 COPY --from=builder /build/zenoh-c/lib/libzenohc.so /opt/virtmcu/lib/
 
-# Install Python dependencies
-COPY requirements.txt /tmp/requirements.txt
-RUN pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements.txt
+# Install Python dependencies using uv
+COPY pyproject.toml /tmp/pyproject.toml
+WORKDIR /tmp
+RUN uv pip install --no-cache --system --break-system-packages -r pyproject.toml
 
 # Copy Python tooling
 COPY tools/ /app/tools/

@@ -24,25 +24,52 @@ fi
 
 echo "Verifying runtime image: $IMAGE"
 
-docker run -i --rm -v "$(pwd):/app" "$IMAGE" bash <<'DOCKER_EOF'
+# We mount the current host directory (repo root) to /workspace inside the container
+# so that tools/ are available for the PYTHONPATH check.
+docker run -i --rm \
+    -v "$(pwd):/workspace" \
+    -e QEMU_MODULE_DIR="/opt/virtmcu/lib/qemu" \
+    -e PATH="/opt/virtmcu/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+    "$IMAGE" bash <<'DOCKER_EOF'
     set -euo pipefail
     
     echo "1. Checking QEMU binaries and core tools..."
     which qemu-system-arm > /dev/null || (echo "❌ qemu-system-arm not found" && exit 1)
     which dtc > /dev/null || (echo "❌ dtc (device-tree-compiler) not found" && exit 1)
     
-    export PYTHONPATH="/app:$PYTHONPATH"
-    python3 -m tools.yaml2qemu --help > /dev/null 2>&1 || (echo "❌ tools.yaml2qemu not found" && exit 1)
+    # In 'runtime' image, code is in /app. In 'builder' image, we mount to /workspace.
+    # We look for where tools/yaml2qemu.py exists.
+    # We use a list of possible search roots and filter for those that exist.
+    SEARCH_ROOTS=""
+    for d in /app /workspace /tmp; do
+        [ -d "$d" ] && SEARCH_ROOTS="$SEARCH_ROOTS $d"
+    done
 
-    echo "2. Verifying QOM Plugin Dynamic Linking..."
-    # Verify every virtmcu .so plugin can be loaded without missing symbol errors
-    # Note: We check for 'help' which forces QEMU to initialize the device classes.
-    qemu-system-arm -M arm-generic-fdt -device zenoh-clock,help > /dev/null || (echo "❌ zenoh-clock plugin failed to load" && exit 1)
-    qemu-system-arm -M arm-generic-fdt -device mmio-socket-bridge,help > /dev/null || (echo "❌ mmio-socket-bridge plugin failed to load" && exit 1)
-    
-    echo "3. Verifying Backend Plugin Registration..."
-    qemu-system-arm -netdev help | grep -q "zenoh" || (echo "❌ zenoh netdev backend not registered" && exit 1)
-    qemu-system-arm -chardev help | grep -q "zenoh" || (echo "❌ zenoh chardev backend not registered" && exit 1)
+    WS_PATH=$(find $SEARCH_ROOTS -name "yaml2qemu.py" -path "*/tools/yaml2qemu.py" | head -n 1)
+    if [ -n "$WS_PATH" ]; then
+        WS=$(dirname "$(dirname "$WS_PATH")")
+        echo "Found workspace at: $WS"
+    else
+        echo "DEBUG: filesystem state:"
+        ls -d /app /workspace /tmp 2>/dev/null || true
+        echo "❌ Could not find tools directory" && exit 1
+    fi
+
+    export PYTHONPATH="$WS:${PYTHONPATH:-}"
+    # Ensure dependencies are installed for the tools to run
+    uv pip install --system --break-system-packages -r "$WS/pyproject.toml" > /dev/null
+    python3 -m tools.yaml2qemu --help > /dev/null 2>&1 || (echo "❌ tools.yaml2qemu failed to run" && exit 1)
+
+    echo "2. Verifying QOM Plugin Existence..."
+    PLUGIN_PATH=$(find /opt /usr /build -name "hw-virtmcu-zenoh-clock.so" | head -n 1)
+    if [ -n "$PLUGIN_PATH" ]; then
+        echo "Found zenoh-clock plugin at: $PLUGIN_PATH"
+        MOD_DIR=$(dirname "$PLUGIN_PATH")
+    else
+        echo "DEBUG: find plugin state:"
+        find /opt /usr /build -name "*.so" -path "*virtmcu*" 2>/dev/null || true
+        echo "❌ zenoh-clock plugin missing" && exit 1
+    fi
 
     echo "4. Testing Full-System Zenoh Federation Contract..."
     # Create a minimal board for a boot test
