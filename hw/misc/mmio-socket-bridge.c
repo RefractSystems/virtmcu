@@ -107,14 +107,10 @@ static void send_req_and_wait(MmioSocketBridgeState *s, struct mmio_req *req, st
 static uint64_t bridge_read(void *opaque, hwaddr addr, unsigned size)
 {
     MmioSocketBridgeState *s = opaque;
-    /* Task 4: Ensure relative offset is sent. 
-       If addr is absolute (e.g. 0x1000000C) and base_addr is 0x10000000, 
-       we send 0x0C. If addr is already relative, this remains correct. */
-    uint64_t offset = (addr >= s->base_addr) ? (addr - s->base_addr) : addr;
     struct mmio_req req = {
         .type = MMIO_REQ_READ, .size = size,
         .vtime_ns = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL),
-        .addr = offset, .data = 0,
+        .addr = addr, .data = 0,
     };
     struct sysc_msg resp = {0};
     send_req_and_wait(s, &req, &resp);
@@ -124,11 +120,10 @@ static uint64_t bridge_read(void *opaque, hwaddr addr, unsigned size)
 static void bridge_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
 {
     MmioSocketBridgeState *s = opaque;
-    uint64_t offset = (addr >= s->base_addr) ? (addr - s->base_addr) : addr;
     struct mmio_req req = {
         .type = MMIO_REQ_WRITE, .size = size,
         .vtime_ns = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL),
-        .addr = offset, .data = val,
+        .addr = addr, .data = val,
     };
     struct sysc_msg resp = {0};
     send_req_and_wait(s, &req, &resp);
@@ -157,6 +152,9 @@ static void bridge_realize(DeviceState *dev, Error **errp)
     qemu_set_fd_handler(s->sock_fd, bridge_sock_handler, NULL, s);
     memory_region_init_io(&s->mmio, OBJECT(s), &bridge_mmio_ops, s, "mmio-socket-bridge", s->region_size);
     sysbus_init_mmio(SYS_BUS_DEVICE(s), &s->mmio);
+    if (s->base_addr != 0) {
+        sysbus_mmio_map(SYS_BUS_DEVICE(s), 0, s->base_addr);
+    }
 }
 
 static void bridge_instance_init(Object *obj) {
