@@ -2,7 +2,7 @@ import os
 import socket
 import sys
 
-from vproto import (
+from tools.vproto import (
     SIZE_MMIO_REQ,
     SIZE_VIRTMCU_HANDSHAKE,
     VIRTMCU_PROTO_MAGIC,
