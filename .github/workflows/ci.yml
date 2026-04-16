@@ -171,6 +171,8 @@ jobs:
             pre: "make -C test/riscv"
           - phase: "11_3"
             pre: "cmake -S tools/systemc_adapter -B tools/systemc_adapter/build -DCMAKE_BUILD_TYPE=Release && make -C tools/systemc_adapter/build rp_adapter"
+          - phase: "12"
+            pre: "make -C test/phase1 && uv pip install --system --break-system-packages -r pyproject.toml"
 
     steps:
       - uses: actions/checkout@v5

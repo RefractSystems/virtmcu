@@ -93,8 +93,6 @@ static ZenohTelemetryState *global_telemetry;
 static gpointer telemetry_publish_thread(gpointer arg)
 {
     ZenohTelemetryState *s = arg;
-    fprintf(stderr, "[telemetry] publish thread started\n");
-    fflush(stderr);
 
     flatcc_builder_t builder;
     flatcc_builder_init(&builder);
@@ -122,8 +120,6 @@ static gpointer telemetry_publish_thread(gpointer arg)
     }
     
     flatcc_builder_clear(&builder);
-    fprintf(stderr, "[telemetry] publish thread exiting\n");
-    fflush(stderr);
     return NULL;
 }
 
@@ -164,8 +160,6 @@ static void telemetry_irq_hook(void *opaque, int n, int level)
 static void zenoh_telemetry_realize(DeviceState *dev, Error **errp)
 {
     ZenohTelemetryState *s = ZENOH_TELEMETRY(dev);
-    fprintf(stderr, "[telemetry] realize node=%u\n", s->node_id);
-    fflush(stderr);
     if (global_telemetry) {
         error_setg(errp, "Only one zenoh-telemetry device allowed");
         return;

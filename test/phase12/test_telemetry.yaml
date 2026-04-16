@@ -8,11 +8,6 @@ peripherals:
     address: 0x40000000
     properties:
       size: '0x01000000'
-  - name: gic
-    type: IRQControllers.ARM_GenericInterruptController
-    address: 0x08000000
-    properties:
-      architectureVersion: 2
   - name: telemetry0
     type: zenoh-telemetry
     properties:
@@ -20,5 +15,3 @@ peripherals:
   - name: uart0
     type: UART.PL011
     address: 0x09000000
-    interrupts:
-      - gic@1
