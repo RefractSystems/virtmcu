@@ -1,31 +1,22 @@
-import struct
 import sys
+import os
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.path.join(SCRIPT_DIR, "telemetry_fbs"))
 
 import zenoh
-
-# typedef struct __attribute__((packed)) {
-#     uint64_t timestamp_ns;
-#     uint8_t  type;
-#     uint32_t id;
-#     uint32_t value;
-# } TraceEvent;
-EVENT_FMT = "<Q B I I"
-EVENT_SIZE = struct.calcsize(EVENT_FMT)
-
-
-def decode_id(ev_type, ev_id):
-    if ev_type == 1:  # TRACE_EVENT_IRQ: upper 16 bits = dev_slot, lower 16 = pin
-        dev_slot = (ev_id >> 16) & 0xFFFF
-        pin = ev_id & 0xFFFF
-        slot_str = "?" if dev_slot == 0xFFFF else str(dev_slot)
-        return f"dev={slot_str} pin={pin}"
-    return f"id={ev_id}"
-
+from Virtmcu.Telemetry.TraceEvent import TraceEvent
 
 def on_sample(sample):
     payload = sample.payload.to_bytes()
-    if len(payload) == EVENT_SIZE:
-        ts, ev_type, ev_id, val = struct.unpack(EVENT_FMT, payload)
+    try:
+        ev = TraceEvent.GetRootAs(payload, 0)
+        
+        ts = ev.TimestampNs()
+        ev_type = ev.Type()
+        ev_id = ev.Id()
+        val = ev.Value()
+
         if ev_type == 0:  # CPU_STATE
             type_str = "CPU_STATE"
             id_str = f"cpu={ev_id}"
@@ -42,8 +33,8 @@ def on_sample(sample):
             id_str = f"id={ev_id}"
 
         print(f"[{ts:15}] {type_str:10} {id_str} val={val:3}")
-    else:
-        print(f"Received malformed payload of size {len(payload)}: {payload.hex()}")
+    except Exception as e:
+        print(f"Received malformed payload of size {len(payload)}: {payload.hex()} ({e})")
 
 
 if __name__ == "__main__":
