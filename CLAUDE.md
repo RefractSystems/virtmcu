@@ -332,13 +332,15 @@ design changes there. Flag anything that should change when writing Phase 7+ cod
 
 ### Recommended FirmwareStudio Design Changes (when Phase 7 arrives)
 
+*Note: These changes apply to the external **FirmwareStudio** repository to integrate with virtmcu.*
+
 | Current POC design | Recommended change | Reason |
 |---|---|---|
 | `-icount` + `qemu_icount_bias` as the only clock mode | `slaved-suspend` as default | ~95% free-run speed; no external Python process |
 | IVSHMEM PCI device for all sensor/actuator I/O | QOM peripheral models via arm-generic-fdt | Sensors defined in `.repl`, no hardcoded PCI setup |
 | Hardcoded Cortex-A15 machine | `arm-generic-fdt` + `repl2qemu` | Any board from a `.repl` file |
-| `node_agent.py` embedded in `cyber/src/` | **Deleted** — replaced by `hw/zenoh/` native plugin | Eliminates Python from the simulation loop entirely |
-| `studio_server.py` coupling MCP to QEMU | Keep MCP as the AI/IDE layer; virtmcu exposes QMP | Separation of concerns |
+| `node_agent.py` (FirmwareStudio) embedded in `cyber/src/` | **Deleted** — replaced by `hw/zenoh/` native plugin | Eliminates Python from the simulation loop entirely |
+| `studio_server.py` (FirmwareStudio) coupling MCP to QEMU | Keep MCP as the AI/IDE layer; virtmcu exposes QMP | Separation of concerns |
 | QEMU 10.2.1 pinned download | virtmcu-patched 11.0.0-rc3 image from `docker/Dockerfile` | arm-generic-fdt patches, better APIs |
 
 ### Lessons from qbox (Qualcomm) and MINRES
