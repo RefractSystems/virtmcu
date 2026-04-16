@@ -37,7 +37,7 @@ def test_parse_single_cpu():
         }
     )
     try:
-        platform = parse_yaml_platform(path)
+        platform, _ = parse_yaml_platform(path)
         assert len(platform.devices) == 1
         dev = platform.devices[0]
         assert dev.name == "cpu0"
@@ -60,7 +60,7 @@ def test_parse_multi_cpu():
         }
     )
     try:
-        platform = parse_yaml_platform(path)
+        platform, _ = parse_yaml_platform(path)
         assert len(platform.devices) == 2
         names = {d.name for d in platform.devices}
         assert names == {"cpu0", "cpu1"}
@@ -85,7 +85,7 @@ def test_parse_uart_peripheral():
         }
     )
     try:
-        platform = parse_yaml_platform(path)
+        platform, _ = parse_yaml_platform(path)
         devs = [d for d in platform.devices if d.name == "uart0"]
         assert len(devs) == 1
         assert devs[0].type_name == "UART.PL011"
@@ -109,7 +109,7 @@ def test_parse_memory_with_properties():
         }
     )
     try:
-        platform = parse_yaml_platform(path)
+        platform, _ = parse_yaml_platform(path)
         dev = next(d for d in platform.devices if d.name == "sram")
         assert dev.type_name == "Memory.MappedMemory"
         assert dev.properties["size"] == "0x00040000"
@@ -132,7 +132,7 @@ def test_parse_interrupt():
         }
     )
     try:
-        platform = parse_yaml_platform(path)
+        platform, _ = parse_yaml_platform(path)
         dev = next(d for d in platform.devices if d.name == "usart1")
         assert len(dev.interrupts) == 1
         irq = dev.interrupts[0]
@@ -151,7 +151,7 @@ def test_renode_type_alias():
         }
     )
     try:
-        platform = parse_yaml_platform(path)
+        platform, _ = parse_yaml_platform(path)
         dev = next(d for d in platform.devices if d.name == "uart0")
         assert dev.type_name == "UART.PL011"
     finally:
@@ -161,7 +161,7 @@ def test_renode_type_alias():
 def test_empty_platform():
     path = write_yaml({"machine": {"cpus": []}, "peripherals": []})
     try:
-        platform = parse_yaml_platform(path)
+        platform, _ = parse_yaml_platform(path)
         assert isinstance(platform, ReplPlatform)
         assert len(platform.devices) == 0
     finally:
@@ -179,7 +179,7 @@ def test_cpu_and_peripherals_combined():
         }
     )
     try:
-        platform = parse_yaml_platform(path)
+        platform, _ = parse_yaml_platform(path)
         # 1 CPU + 2 peripherals
         assert len(platform.devices) == 3
         names = {d.name for d in platform.devices}
