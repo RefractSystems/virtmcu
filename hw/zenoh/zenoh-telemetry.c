@@ -10,6 +10,7 @@
 #include "hw/core/qdev-properties.h"
 #include "qapi/error.h"
 #include "qemu/timer.h"
+#include "qemu/bswap.h"
 #include "system/cpus.h"
 #include "virtmcu/hooks.h"
 #include <zenoh.h>
@@ -18,8 +19,8 @@
 OBJECT_DECLARE_SIMPLE_TYPE(ZenohTelemetryState, ZENOH_TELEMETRY)
 
 typedef enum {
-    TRACE_EVENT_CPU_STATE = 0,
-    TRACE_EVENT_IRQ       = 1,
+    TRACE_EVENT_CPU_STATE  = 0,
+    TRACE_EVENT_IRQ        = 1,
     TRACE_EVENT_PERIPHERAL = 2,
 } TraceEventType;
 
@@ -38,10 +39,11 @@ struct ZenohTelemetryState {
     char    *router;
 
     /* Zenoh handles */
-    z_owned_session_t session;
-    z_owned_keyexpr_t keyexpr;
+    z_owned_session_t   session;
+    z_owned_publisher_t publisher;
 
     /* Internal state */
+    bool session_open;
     bool last_halted;
 };
 
@@ -50,21 +52,21 @@ static ZenohTelemetryState *global_telemetry;
 static void send_event(ZenohTelemetryState *s, TraceEventType type, uint32_t id, uint32_t value)
 {
     TraceEvent ev = {
-        .timestamp_ns = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL),
-        .type = (uint8_t)type,
-        .id = id,
-        .value = value,
+        .timestamp_ns = cpu_to_le64(qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL)),
+        .type  = (uint8_t)type,
+        .id    = cpu_to_le32(id),
+        .value = cpu_to_le32(value),
     };
-
     z_owned_bytes_t bytes;
     z_bytes_copy_from_buf(&bytes, (const uint8_t *)&ev, sizeof(ev));
-    z_put(z_session_loan(&s->session), z_keyexpr_loan(&s->keyexpr), z_move(bytes), NULL);
+    z_publisher_put(z_publisher_loan(&s->publisher), z_move(bytes), NULL);
 }
 
 static void telemetry_cpu_halt_hook(CPUState *cpu, bool halted)
 {
     ZenohTelemetryState *s = global_telemetry;
-    if (!s) return;
+    if (!s || halted == s->last_halted) return;
+    s->last_halted = halted;
     send_event(s, TRACE_EVENT_CPU_STATE, 0, halted ? 1 : 0);
 }
 
@@ -82,7 +84,6 @@ static void zenoh_telemetry_realize(DeviceState *dev, Error **errp)
         error_setg(errp, "Only one zenoh-telemetry device allowed");
         return;
     }
-    global_telemetry = s;
 
     z_owned_config_t config;
     z_config_default(&config);
@@ -97,11 +98,23 @@ static void zenoh_telemetry_realize(DeviceState *dev, Error **errp)
         error_setg(errp, "[zenoh-telemetry] failed to open Zenoh session");
         return;
     }
+    s->session_open = true;
 
     char topic[128];
     snprintf(topic, sizeof(topic), "sim/telemetry/trace/%u", s->node_id);
-    z_keyexpr_from_str(&s->keyexpr, topic);
+    z_owned_keyexpr_t keyexpr;
+    z_keyexpr_from_str(&keyexpr, topic);
+    if (z_declare_publisher(z_session_loan(&s->session), &s->publisher,
+                            z_keyexpr_loan(&keyexpr), NULL) != 0) {
+        z_keyexpr_drop(z_move(keyexpr));
+        z_session_drop(z_move(s->session));
+        s->session_open = false;
+        error_setg(errp, "[zenoh-telemetry] failed to declare publisher");
+        return;
+    }
+    z_keyexpr_drop(z_move(keyexpr));
 
+    global_telemetry = s;
     virtmcu_cpu_halt_hook = telemetry_cpu_halt_hook;
     virtmcu_irq_hook = telemetry_irq_hook;
 }
@@ -114,8 +127,11 @@ static void zenoh_telemetry_instance_finalize(Object *obj)
         virtmcu_cpu_halt_hook = NULL;
         virtmcu_irq_hook = NULL;
     }
-    z_keyexpr_drop(z_move(s->keyexpr));
-    z_session_drop(z_move(s->session));
+    if (s->session_open) {
+        z_undeclare_publisher(z_move(s->publisher));
+        z_session_drop(z_move(s->session));
+        s->session_open = false;
+    }
 }
 
 static const Property zenoh_telemetry_properties[] = {
