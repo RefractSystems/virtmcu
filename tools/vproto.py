@@ -74,3 +74,40 @@ class SyscMsg:
     def pack(self) -> bytes:
         return struct.pack(FMT_SYSC_MSG, self.type, self.irq_num, self.data)
 
+FMT_CLOCK_ADVANCE_REQ = '<QQ'
+SIZE_CLOCK_ADVANCE_REQ = struct.calcsize(FMT_CLOCK_ADVANCE_REQ)
+
+@dataclass
+class ClockAdvanceReq:
+    delta_ns: int  # uint64_t
+    mujoco_time_ns: int  # uint64_t
+
+    @classmethod
+    def unpack(cls, data: bytes) -> 'ClockAdvanceReq':
+        if len(data) != SIZE_CLOCK_ADVANCE_REQ:
+            raise ValueError(f"Expected {SIZE_CLOCK_ADVANCE_REQ} bytes for ClockAdvanceReq, got {len(data)}")
+        unpacked = struct.unpack(FMT_CLOCK_ADVANCE_REQ, data)
+        return cls(*unpacked)
+
+    def pack(self) -> bytes:
+        return struct.pack(FMT_CLOCK_ADVANCE_REQ, self.delta_ns, self.mujoco_time_ns)
+
+FMT_CLOCK_READY_RESP = '<QII'
+SIZE_CLOCK_READY_RESP = struct.calcsize(FMT_CLOCK_READY_RESP)
+
+@dataclass
+class ClockReadyResp:
+    current_vtime_ns: int  # uint64_t
+    n_frames: int  # uint32_t
+    error_code: int  # uint32_t
+
+    @classmethod
+    def unpack(cls, data: bytes) -> 'ClockReadyResp':
+        if len(data) != SIZE_CLOCK_READY_RESP:
+            raise ValueError(f"Expected {SIZE_CLOCK_READY_RESP} bytes for ClockReadyResp, got {len(data)}")
+        unpacked = struct.unpack(FMT_CLOCK_READY_RESP, data)
+        return cls(*unpacked)
+
+    def pack(self) -> bytes:
+        return struct.pack(FMT_CLOCK_READY_RESP, self.current_vtime_ns, self.n_frames, self.error_code)
+

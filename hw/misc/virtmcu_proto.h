@@ -60,4 +60,15 @@ struct sysc_msg {
     uint64_t data;
 } __attribute__((packed));
 
+struct clock_advance_req {
+    uint64_t delta_ns;
+    uint64_t mujoco_time_ns;
+} __attribute__((packed));
+
+struct clock_ready_resp {
+    uint64_t current_vtime_ns;
+    uint32_t n_frames;
+    uint32_t error_code; /* 0=OK, 1=STALL */
+} __attribute__((packed));
+
 #endif /* VIRTMCU_PROTO_H */

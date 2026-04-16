@@ -1,6 +1,13 @@
 import sys
-import struct
+import os
 import zenoh
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+TOOLS_DIR = os.path.join(os.path.dirname(os.path.dirname(SCRIPT_DIR)), "tools")
+if TOOLS_DIR not in sys.path:
+    sys.path.append(TOOLS_DIR)
+
+from vproto import ClockAdvanceReq, ClockReadyResp
 
 DELTA1_NS = 1_000_000
 DELTA2_NS = 2_000_000
@@ -9,15 +16,15 @@ TIMEOUT_S = 5.0
 
 
 def pack_req(delta_ns):
-    return struct.pack("<QQ", delta_ns, 0)
+    req = ClockAdvanceReq(delta_ns=delta_ns, mujoco_time_ns=0)
+    return req.pack()
 
 
 def unpack_rep(data):
-    # Payload is 16 bytes: <Q (vtime_ns) I (n_frames) I (error_code)
-    vtime_ns, _n_frames, error_code = struct.unpack("<QII", data)
-    if error_code != 0:
-        print(f"WARNING: Reply error_code = {error_code} (1=STALL, 2=ZENOH_ERROR)", file=sys.stderr)
-    return vtime_ns
+    resp = ClockReadyResp.unpack(data)
+    if resp.error_code != 0:
+        print(f"WARNING: Reply error_code = {resp.error_code} (1=STALL, 2=ZENOH_ERROR)", file=sys.stderr)
+    return resp.current_vtime_ns
 
 
 def send_query(session, delta_ns, label):

@@ -125,9 +125,16 @@ Listen on tcp/127.0.0.1:7448 with multicast disabled.
 Send one clock-advance GET to QEMU and verify the reply vtime > 0.
 """
 import sys
-import struct
 import time
+import os
 import zenoh
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+TOOLS_DIR = os.path.join(os.path.dirname(os.path.dirname(SCRIPT_DIR)), "tools")
+if TOOLS_DIR not in sys.path:
+    sys.path.append(TOOLS_DIR)
+
+from vproto import ClockAdvanceReq, ClockReadyResp
 
 ROUTER_PORT = 7448
 TOPIC       = "sim/clock/advance/0"
@@ -136,13 +143,13 @@ TIMEOUT_S   = 15.0
 
 
 def pack_req(delta_ns: int) -> bytes:
-    return struct.pack("<QQ", delta_ns, 0)
+    req = ClockAdvanceReq(delta_ns=delta_ns, mujoco_time_ns=0)
+    return req.pack()
 
 
 def unpack_rep(data: bytes) -> int:
-    # 16-byte reply: <Q (vtime_ns) I (n_frames) I (error_code)
-    vtime_ns, _n_frames, _error_code = struct.unpack("<QII", data)
-    return vtime_ns
+    resp = ClockReadyResp.unpack(data)
+    return resp.current_vtime_ns
 
 
 def main() -> None:

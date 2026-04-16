@@ -13,6 +13,14 @@ router= property and falls back to multicast peer discovery.
 import struct
 import sys
 import time
+import os
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+TOOLS_DIR = os.path.join(os.path.dirname(SCRIPT_DIR), "tools")
+if TOOLS_DIR not in sys.path:
+    sys.path.append(TOOLS_DIR)
+
+from vproto import ClockAdvanceReq, ClockReadyResp
 
 import zenoh
 
@@ -22,12 +30,13 @@ TIMEOUT_S = 15.0
 
 
 def pack_req(delta_ns: int) -> bytes:
-    return struct.pack("<QQ", delta_ns, 0)
+    req = ClockAdvanceReq(delta_ns=delta_ns, mujoco_time_ns=0)
+    return req.pack()
 
 
 def unpack_rep(data: bytes) -> int:
-    vtime_ns, _n_frames = struct.unpack("<QI", data)
-    return vtime_ns
+    resp = ClockReadyResp.unpack(data)
+    return resp.current_vtime_ns
 
 
 def main() -> None:

@@ -1,21 +1,25 @@
 import sys
-import struct
+import os
 import zenoh
 import time
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+TOOLS_DIR = os.path.join(os.path.dirname(os.path.dirname(SCRIPT_DIR)), "tools")
+if TOOLS_DIR not in sys.path:
+    sys.path.append(TOOLS_DIR)
+
+from vproto import ClockAdvanceReq, ClockReadyResp
 
 TOPIC = "sim/clock/advance/0"
 TIMEOUT_S = 5.0
 
 def pack_req(delta_ns):
-    return struct.pack("<QQ", delta_ns, 0)
+    req = ClockAdvanceReq(delta_ns=delta_ns, mujoco_time_ns=0)
+    return req.pack()
 
 def unpack_rep(data):
-    # Expect 16 bytes: <Q (vtime_ns) I (n_frames) I (error_code)
-    if len(data) != 16:
-        print(f"ERROR: Expected 16 bytes, got {len(data)}", file=sys.stderr)
-        sys.exit(1)
-    vtime_ns, n_frames, error_code = struct.unpack("<QII", data)
-    return vtime_ns, error_code
+    resp = ClockReadyResp.unpack(data)
+    return resp.current_vtime_ns, resp.error_code
 
 def main():
     config = zenoh.Config()
