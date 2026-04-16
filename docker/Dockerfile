@@ -25,33 +25,33 @@ FROM ubuntu:24.04 AS toolchain
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential \
-        git \
-        cmake \
-        meson \
-        ninja-build \
-        python3 \
-        python3-venv \
-        pkg-config \
-        libglib2.0-dev \
-        libpixman-1-dev \
-        flex \
-        bison \
-        device-tree-compiler \
-        libslirp-dev \
-        curl \
-        wget \
-        ca-certificates \
-        b4 \
-        gdb \
-        gdb-multiarch \
-        gcc-arm-none-eabi \
-        gcc-riscv64-linux-gnu \
-        binutils-riscv64-linux-gnu \
-        cargo \
-        rustc \
-        gh \
-        jq \
+    build-essential \
+    git \
+    cmake \
+    meson \
+    ninja-build \
+    python3 \
+    python3-venv \
+    pkg-config \
+    libglib2.0-dev \
+    libpixman-1-dev \
+    flex \
+    bison \
+    device-tree-compiler \
+    libslirp-dev \
+    curl \
+    wget \
+    ca-certificates \
+    b4 \
+    gdb \
+    gdb-multiarch \
+    gcc-arm-none-eabi \
+    gcc-riscv64-linux-gnu \
+    binutils-riscv64-linux-gnu \
+    cargo \
+    rustc \
+    gh \
+    jq \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv for fast Python package management
@@ -71,34 +71,34 @@ LABEL org.opencontainers.image.licenses=MIT
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential \
-        git \
-        cmake \
-        meson \
-        ninja-build \
-        python3 \
-        python3-venv \
-        pkg-config \
-        libglib2.0-dev \
-        libpixman-1-dev \
-        flex \
-        bison \
-        device-tree-compiler \
-        libslirp-dev \
-        curl \
-        wget \
-        ca-certificates \
-        b4 \
-        gdb \
-        gdb-multiarch \
-        gcc-arm-none-eabi \
-        gcc-riscv64-linux-gnu \
-        binutils-riscv64-linux-gnu \
-        cargo \
-        rustc \
-        strace \
-        gh \
-        jq \
+    build-essential \
+    git \
+    cmake \
+    meson \
+    ninja-build \
+    python3 \
+    python3-venv \
+    pkg-config \
+    libglib2.0-dev \
+    libpixman-1-dev \
+    flex \
+    bison \
+    device-tree-compiler \
+    libslirp-dev \
+    curl \
+    wget \
+    ca-certificates \
+    b4 \
+    gdb \
+    gdb-multiarch \
+    gcc-arm-none-eabi \
+    gcc-riscv64-linux-gnu \
+    binutils-riscv64-linux-gnu \
+    cargo \
+    rustc \
+    strace \
+    gh \
+    jq \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv for fast Python package management
@@ -153,11 +153,11 @@ RUN git clone --depth=1 --branch "${QEMU_REF}" "${QEMU_REPO}" qemu
 # other. Cache key: ZENOH_C_REF arg.
 # meson.build resolves meson.project_source_root()/../zenoh-c → /build/zenoh-c ✓
 RUN git clone --depth=1 --branch "${ZENOH_C_REF}" \
-        https://github.com/eclipse-zenoh/zenoh-c.git /build/zenoh-c-src \
+    https://github.com/eclipse-zenoh/zenoh-c.git /build/zenoh-c-src \
     && cmake -S /build/zenoh-c-src -B /build/zenoh-c-build \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_INSTALL_PREFIX=/build/zenoh-c \
-        -DZENOHC_BUILD_WITH_SHARED_MEMORY=OFF \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/build/zenoh-c \
+    -DZENOHC_BUILD_WITH_SHARED_MEMORY=OFF \
     && cmake --build /build/zenoh-c-build -j"$(nproc)" \
     && cmake --install /build/zenoh-c-build \
     && rm -rf /build/zenoh-c-src /build/zenoh-c-build
@@ -193,19 +193,19 @@ RUN cd qemu && python3 /build/patches/apply_zenoh_chardev.py .
 COPY hw/ /build/virtmcu-hw/
 RUN ln -s /build/virtmcu-hw /build/qemu/hw/virtmcu \
     && grep -q "subdir('virtmcu')" /build/qemu/hw/meson.build \
-       || printf "\n# virtmcu out-of-tree peripherals\nsubdir('virtmcu')\n" \
-          >> /build/qemu/hw/meson.build
+    || printf "\n# virtmcu out-of-tree peripherals\nsubdir('virtmcu')\n" \
+    >> /build/qemu/hw/meson.build
 
 # Configure and build
 # hadolint ignore=DL3003
 RUN cd qemu \
     && ./configure \
-        --prefix=/opt/virtmcu \
-        --target-list="${ARCH}-softmmu,riscv32-softmmu,riscv64-softmmu" \
-        --enable-modules \
-        --enable-fdt \
-        --disable-werror \
-        --disable-docs \
+    --prefix=/opt/virtmcu \
+    --target-list="${ARCH}-softmmu,riscv32-softmmu,riscv64-softmmu" \
+    --enable-modules \
+    --enable-fdt \
+    --disable-werror \
+    --disable-docs \
     && make -j"$(nproc)" \
     && make install
 
