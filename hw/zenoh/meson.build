@@ -24,10 +24,15 @@ elif cc.has_header('flatcc/flatcc_builder.h', args: '-I' + local_flatcc_dir / 'i
   endif
 endif
 
+flatcc_cargs = []
+if flatcc_inc.length() > 0
+  flatcc_cargs += ['-I' + flatcc_inc[0]]
+endif
+
 flatcc_lib = cc.find_library('flatccrt', dirs: flatcc_lib_dirs)
 flatcc_dep = declare_dependency(
   dependencies: flatcc_lib,
-  compile_args: ['-I' + d for d in flatcc_inc]
+  compile_args: flatcc_cargs
 )
 
 telemetry_fbs = files('telemetry.fbs')
