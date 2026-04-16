@@ -21,6 +21,10 @@
 #include "qemu/bswap.h"
 #include "system/cpus.h"
 #include "virtmcu/hooks.h"
+
+/* QEMU defines UINT128_MAX but not uint128_t, which breaks flatcc */
+typedef __uint128_t uint128_t;
+#include "telemetry_builder.h"
 #include <zenoh.h>
 
 #define TYPE_ZENOH_TELEMETRY "zenoh-telemetry"
@@ -64,7 +68,7 @@ static uint16_t irq_slot_for(void *opaque)
 }
 
 struct ZenohTelemetryState {
-    DeviceState parent_obj;
+    SysBusDevice parent_obj;
 
     /* Properties */
     uint32_t node_id;
@@ -91,17 +95,33 @@ static gpointer telemetry_publish_thread(gpointer arg)
     ZenohTelemetryState *s = arg;
     fprintf(stderr, "[telemetry] publish thread started\n");
     fflush(stderr);
+
+    flatcc_builder_t builder;
+    flatcc_builder_init(&builder);
+
     while (1) {
         TraceEvent *ev = g_async_queue_pop(s->event_queue);
         if (!ev) break; /* NULL sentinel — time to exit */
         
-        // fprintf(stderr, "[telemetry] publishing event: type=%d\n", ev->type);
-        // fflush(stderr);
-        z_owned_bytes_t bytes;
-        z_bytes_copy_from_buf(&bytes, (const uint8_t *)ev, sizeof(*ev));
-        z_publisher_put(z_publisher_loan(&s->publisher), z_move(bytes), NULL);
+        flatcc_builder_reset(&builder);
+        Virtmcu_Telemetry_TraceEvent_start_as_root(&builder);
+        Virtmcu_Telemetry_TraceEvent_timestamp_ns_add(&builder, le64_to_cpu(ev->timestamp_ns));
+        Virtmcu_Telemetry_TraceEvent_type_add(&builder, ev->type);
+        Virtmcu_Telemetry_TraceEvent_id_add(&builder, le32_to_cpu(ev->id));
+        Virtmcu_Telemetry_TraceEvent_value_add(&builder, le32_to_cpu(ev->value));
+        Virtmcu_Telemetry_TraceEvent_end_as_root(&builder);
+
+        size_t size;
+        void *buf = flatcc_builder_get_direct_buffer(&builder, &size);
+        if (buf) {
+            z_owned_bytes_t bytes;
+            z_bytes_copy_from_buf(&bytes, buf, size);
+            z_publisher_put(z_publisher_loan(&s->publisher), z_move(bytes), NULL);
+        }
         g_free(ev);
     }
+    
+    flatcc_builder_clear(&builder);
     fprintf(stderr, "[telemetry] publish thread exiting\n");
     fflush(stderr);
     return NULL;
@@ -234,7 +254,7 @@ static void zenoh_telemetry_class_init(ObjectClass *klass, const void *data)
 static const TypeInfo zenoh_telemetry_types[] = {
     {
         .name              = TYPE_ZENOH_TELEMETRY,
-        .parent            = TYPE_DEVICE,
+        .parent            = TYPE_SYS_BUS_DEVICE,
         .instance_size     = sizeof(ZenohTelemetryState),
         .instance_finalize = zenoh_telemetry_instance_finalize,
         .class_init        = zenoh_telemetry_class_init,

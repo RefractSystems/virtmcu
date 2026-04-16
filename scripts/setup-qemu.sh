@@ -128,7 +128,7 @@ if [ ! -x "$FLATCC_DIR/bin/flatcc" ]; then
     mkdir -p "$WORKSPACE_DIR/third_party"
     git clone https://github.com/dvidelabs/flatcc.git "$FLATCC_DIR"
     cd "$FLATCC_DIR"
-    ./scripts/build.sh
+    CFLAGS="-fPIC" ./scripts/build.sh
     cd "$WORKSPACE_DIR"
 fi
 
