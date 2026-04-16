@@ -45,7 +45,8 @@ fi
 echo "Running Phase 3 smoke test (repl2qemu parser)..."
 
 # Ensure clean state
-rm -f "$OUT_DTB" qemu_phase3.log
+rm -f "$OUT_DTB"
+OUTPUT_LOG=$(mktemp /tmp/qemu_phase3-XXXXXX.log)
 
 # 1. Run the repl2qemu parser as a module
 echo "1. Parsing $REPL_FILE -> $OUT_DTB"
@@ -65,17 +66,18 @@ timeout 2s "$RUN_SH" --dtb "$OUT_DTB" \
     -nographic \
     -monitor none \
     -m 128M \
-    -serial file:qemu_phase3.log || true
+    -serial file:"$OUTPUT_LOG" || true
 
 # 3. Verification
 # If the repl was translated correctly to a DTB, the kernel will successfully boot and print "HI"
-if grep -q "HI" qemu_phase3.log; then
+if grep -q "HI" "$OUTPUT_LOG"; then
     echo "Phase 3 smoke test: PASSED (Kernel successfully printed 'HI' via translated DTB)"
-    rm -f "$OUT_DTB" qemu_phase3.log "${OUT_DTB}.dts"
+    rm -f "$OUT_DTB" "$OUTPUT_LOG" "${OUT_DTB}.dts"
     exit 0
 else
     echo "Phase 3 smoke test: FAILED (No 'HI' detected)"
     echo "--- QEMU LOG ---"
-    cat qemu_phase3.log
+    cat "$OUTPUT_LOG"
+    rm -f "$OUTPUT_LOG"
     exit 1
 fi

@@ -43,7 +43,7 @@ echo "Running Phase 3.5 smoke test (YAML platform parsing)..."
 
 # 1. Boot QEMU with the YAML platform directly
 echo "1. Booting QEMU via run.sh --yaml $YAML_FILE"
-OUTPUT_LOG="smoke_test_3.5.log"
+OUTPUT_LOG=$(mktemp /tmp/smoke_test_3.5-XXXXXX.log)
 rm -f "$OUTPUT_LOG"
 
 timeout 3s "$RUN_SH" --yaml "$YAML_FILE" --kernel "$KERNEL" -nographic -monitor none -serial file:"$OUTPUT_LOG" || true
