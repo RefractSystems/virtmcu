@@ -123,7 +123,9 @@ fi
 
 # Phase 12: Fetch and compile flatcc for Telemetry
 FLATCC_DIR="$WORKSPACE_DIR/third_party/flatcc"
-if [ ! -x "$FLATCC_DIR/bin/flatcc" ]; then
+if command -v flatcc >/dev/null 2>&1; then
+    echo "==> flatcc already installed in system, skipping local build."
+elif [ ! -x "$FLATCC_DIR/bin/flatcc" ]; then
     echo "==> Fetching and compiling flatcc..."
     mkdir -p "$WORKSPACE_DIR/third_party"
     git clone https://github.com/dvidelabs/flatcc.git "$FLATCC_DIR"

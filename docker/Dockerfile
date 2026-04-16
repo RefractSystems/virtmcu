@@ -51,7 +51,8 @@ RUN (apt-get update && apt-get install -y --no-install-recommends --fix-missing 
     gh \
     jq \
     lcov \
-    gcovr || \
+    gcovr \
+    flatbuffers-compiler || \
     (sleep 5 && apt-get update && apt-get install -y --no-install-recommends --fix-missing \
     build-essential \
     git \
@@ -79,11 +80,20 @@ RUN (apt-get update && apt-get install -y --no-install-recommends --fix-missing 
     gh \
     jq \
     lcov \
-    gcovr)) \
+    gcovr \
+    flatbuffers-compiler)) \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv for fast Python package management
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/bin/
+
+# ── Stage: flatcc-builder ───────────────────────────────────────────────────
+# Build flatcc once to be shared across stages.
+FROM toolchain AS flatcc-builder
+# hadolint ignore=DL3003
+RUN git clone --depth=1 https://github.com/dvidelabs/flatcc.git /build/flatcc \
+    && cd /build/flatcc \
+    && CFLAGS="-fPIC" ./scripts/build.sh
 
 # ── Stage 1: devenv ───────────────────────────────────────────────────────────
 # Devcontainer image only. MCR base provides the vscode user + sudo setup.
@@ -124,7 +134,8 @@ RUN (apt-get update && apt-get install -y --no-install-recommends --fix-missing 
     binutils-riscv64-linux-gnu \
     strace \
     gh \
-    jq || \
+    jq \
+    flatbuffers-compiler || \
     (sleep 5 && apt-get update && apt-get install -y --no-install-recommends --fix-missing \
     build-essential \
     git \
@@ -151,11 +162,16 @@ RUN (apt-get update && apt-get install -y --no-install-recommends --fix-missing 
     binutils-riscv64-linux-gnu \
     strace \
     gh \
-    jq)) \
+    jq \
+    flatbuffers-compiler)) \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv for fast Python package management
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/bin/
+
+COPY --from=flatcc-builder /build/flatcc/bin/flatcc /usr/local/bin/
+COPY --from=flatcc-builder /build/flatcc/include/flatcc /usr/local/include/flatcc
+COPY --from=flatcc-builder /build/flatcc/lib/libflatcc* /usr/local/lib/
 
 # Install stable Rust via rustup (for both root and vscode user)
 # Use a clean home for root to avoid existing settings warnings
@@ -193,6 +209,10 @@ ARG QEMU_REPO
 ARG QEMU_REF
 ARG ZENOH_C_REF
 ARG TARGETARCH
+
+COPY --from=flatcc-builder /build/flatcc/bin/flatcc /usr/local/bin/
+COPY --from=flatcc-builder /build/flatcc/include/flatcc /usr/local/include/flatcc
+COPY --from=flatcc-builder /build/flatcc/lib/libflatcc* /usr/local/lib/
 
 # We emulate ARM microcontrollers regardless of the host architecture
 ENV ARCH=arm
