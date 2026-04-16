@@ -20,6 +20,16 @@ RESP_FMT = "<IIQ"  # type, irq_num, data
 RESP_SIZE = struct.calcsize(RESP_FMT)
 
 
+def recvall(conn, n):
+    data = b""
+    while len(data) < n:
+        chunk = conn.recv(n - len(data))
+        if not chunk:
+            return None
+        data += chunk
+    return data
+
+
 def start_server(sock_path):
     if os.path.exists(sock_path):
         os.unlink(sock_path)
@@ -33,7 +43,7 @@ def start_server(sock_path):
     print("Connected")
 
     while True:
-        data = conn.recv(REQ_SIZE)
+        data = recvall(conn, REQ_SIZE)
         if not data:
             break
 

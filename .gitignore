@@ -35,6 +35,8 @@ report.html
 *.log
 .coverage
 *_output.txt
+*.cli
+*.arch
 
 # IDEs and Tools
 .vscode/

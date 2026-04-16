@@ -109,7 +109,7 @@ extern void (*virtmcu_get_quantum_timing)(VirtmcuQuantumTiming *timing);
 
     irq_marker = "void qemu_set_irq(qemu_irq irq, int level)\n{"
     irq_insertion = """
-    if (virtmcu_irq_hook) {
+    if (virtmcu_irq_hook && irq) {
         virtmcu_irq_hook(irq->opaque, irq->n, level);
     }
 """

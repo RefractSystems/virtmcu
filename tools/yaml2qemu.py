@@ -89,8 +89,8 @@ def validate_dtb(dtb_path, devices):
         for dev in devices:
             if "CPU" in dev.type_name:
                 continue
-            if dev.type_name == "zenoh-chardev":
-                continue  # Not in DTB
+            if dev.type_name in ("zenoh-chardev", "zenoh-telemetry"):
+                continue  # CLI-only, no DTB node
 
             # Check for name@address (DTS node format), e.g. "uart0@9000000".
             # A name-only check would pass even if the device is mapped at the
@@ -166,6 +166,15 @@ def main():
             cli_args.append(f"zenoh,id={chardev_id},node={node}")
             cli_args.append("-serial")
             cli_args.append(f"chardev:{chardev_id}")
+        elif dev.type_name == "zenoh-telemetry":
+            node = dev.properties.get("node", "0")
+            router = dev.properties.get("router")
+            device_arg = f"zenoh-telemetry,node={node}"
+            if router:
+                device_arg += f",router={router}"
+            cli_args.append("-device")
+            cli_args.append(device_arg)
+            # intentionally excluded from filtered_devices — no MMIO, no DTB node
         elif dev.type_name == "mmio-socket-bridge":
             sock_path = dev.properties.get("socket-path", "")
             region_size = dev.properties.get("region-size", 0x1000)
