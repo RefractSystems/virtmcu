@@ -46,7 +46,7 @@ This document outlines the critical architectural and usability improvements for
 **Goal:** Deliver base-relative offsets to the socket server.
 
 ### Tasks:
-- [x] **Address Translation:** `mmio-socket-bridge.c` now subtracts `s->base_addr` before packing into `mmio_req`. Handles both absolute (legacy) and already-relative addresses defensively.
+- [x] **Address Translation:** `mmio-socket-bridge.c` passes `addr` from `MemoryRegionOps` directly — QEMU already delivers a region-relative offset. The `base-addr` property is used solely for `sysbus_mmio_map()` to place the device in guest address space.
 - [x] **Protocol Documentation:** `CLAUDE.md` Key Constraints section updated to state offsets are delivered.
 
 ### **CRITICAL WARNING:**

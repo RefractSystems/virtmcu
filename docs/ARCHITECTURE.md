@@ -475,7 +475,7 @@ The `mmio-socket-bridge` (and most other virtmcu bridges) delivers **offsets rel
 
 **The Cause**: This follows standard QEMU `MemoryRegionOps` behavior. If a bridge is mapped at `0x10000000` and the guest performs a read at `0x10000004`, the `addr` field in the `mmio_req` packet will be `0x00000004`.
 
-**The Pitfall**: External co-simulation adapters (e.g., in Python or SystemC) must be aware of this. If your adapter logic expects absolute addresses, you must either add the base address in the adapter or mask the incoming address correctly. 
+**Adapter Contract**: Adapters receive pure relative offsets and must NOT add the base address back. The `addr` field in `mmio_req` is always `guest_PA - region_base`, as QEMU computes this before invoking the `MemoryRegionOps` callback.
 
 ### Zenoh Router Reachability
 If QEMU hangs at startup or `TimeAuthority` reports a "Timeout" during `sim/clock/advance`, first verify that the Zenoh router is reachable from the QEMU container.
