@@ -18,6 +18,7 @@
 #include "exec/icount.h"
 #include "virtmcu/hooks.h"
 #include "qemu/error-report.h"
+#include "hw/misc/virtmcu_proto.h"
 #include <zenoh.h>
 
 #define TYPE_ZENOH_CLOCK "zenoh-clock"
@@ -71,17 +72,6 @@ static void zclock_get_quantum_timing(VirtmcuQuantumTiming *timing)
     timing->quantum_delta_ns       = qatomic_read(&s->delta_ns);
     timing->mujoco_time_ns         = qatomic_read(&s->mujoco_time_ns);
 }
-
-typedef struct __attribute__((packed)) {
-    uint64_t delta_ns;
-    uint64_t mujoco_time_ns;
-} ClockAdvancePayload;
-
-typedef struct __attribute__((packed)) {
-    uint64_t current_vtime_ns;
-    uint32_t n_frames;
-    uint32_t error_code; /* 0=OK, 1=STALL */
-} ClockReadyPayload;
 
 static void zclock_timer_cb(void *opaque)
 {
@@ -142,19 +132,19 @@ static void on_query(z_loaned_query_t *query, void *context)
     if (!payload_bytes) {
         fprintf(stderr, "[zenoh-clock] node=%u: ZENOH_ERROR — query arrived with no payload\n",
                 s->node_id);
-        ClockReadyPayload err = {.current_vtime_ns = 0, .n_frames = 0, .error_code = 2};
+        struct clock_ready_resp err = {.current_vtime_ns = 0, .n_frames = 0, .error_code = 2};
         z_owned_bytes_t err_bytes;
         z_bytes_copy_from_buf(&err_bytes, (const uint8_t *)&err, sizeof(err));
         z_query_reply(query, z_query_keyexpr(query), z_move(err_bytes), NULL);
         return;
     }
 
-    ClockAdvancePayload req = {0};
+    struct clock_advance_req req = {0};
     z_bytes_reader_t reader = z_bytes_get_reader(payload_bytes);
     if (z_bytes_reader_read(&reader, (uint8_t *)&req, sizeof(req)) != sizeof(req)) {
-        fprintf(stderr, "[zenoh-clock] node=%u: ZENOH_ERROR — malformed ClockAdvancePayload "
+        fprintf(stderr, "[zenoh-clock] node=%u: ZENOH_ERROR — malformed clock_advance_req "
                 "(expected %zu bytes)\n", s->node_id, sizeof(req));
-        ClockReadyPayload err = {.current_vtime_ns = 0, .n_frames = 0, .error_code = 2};
+        struct clock_ready_resp err = {.current_vtime_ns = 0, .n_frames = 0, .error_code = 2};
         z_owned_bytes_t err_bytes;
         z_bytes_copy_from_buf(&err_bytes, (const uint8_t *)&err, sizeof(err));
         z_query_reply(query, z_query_keyexpr(query), z_move(err_bytes), NULL);
@@ -188,7 +178,7 @@ static void on_query(z_loaned_query_t *query, void *context)
     uint64_t vtime = (error_code == 0) ? (uint64_t)s->vtime_ns : 0;
     qemu_mutex_unlock(&s->mutex);
 
-    ClockReadyPayload rep = {
+    struct clock_ready_resp rep = {
         .current_vtime_ns = vtime,
         .n_frames         = 0,
         .error_code       = error_code,
