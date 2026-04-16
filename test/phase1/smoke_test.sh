@@ -66,7 +66,7 @@ if [ ! -f "$KERNEL" ]; then
 fi
 
 echo "Running smoke test..."
-OUTPUT_LOG="smoke_test_output.log"
+OUTPUT_LOG=$(mktemp /tmp/smoke_test_output-XXXXXX.log)
 # Ensure we start with a clean log
 rm -f "$OUTPUT_LOG"
 

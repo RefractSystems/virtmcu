@@ -151,9 +151,7 @@ echo "[phase5] Starting QEMU..."
     --kernel "$ELF_PATH" \
     -nographic \
     -monitor none \
-    -qmp "unix:$QMP_SOCK,server,nowait" \
-    -device "mmio-socket-bridge,socket-path=$SOCK_PATH,region-size=0x1000,base-addr=0x50000000" \
-    > "$QEMU_LOG" 2>&1 &
+    -qmp "unix:$QMP_SOCK,server,nowait" > "$QEMU_LOG" 2>&1 &
 QEMU_PID=$!
 
 # ── 6. Wait for adapter to log the expected transactions ─────────────────────

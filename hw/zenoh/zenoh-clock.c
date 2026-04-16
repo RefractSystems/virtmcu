@@ -88,7 +88,10 @@ static void zclock_timer_cb(void *opaque)
 static void zclock_quantum_hook(CPUState *cpu)
 {
     ZenohClockState *s = global_zenoh_clock;
-    if (!s || !s->needs_quantum) return;
+    if (!s) return;
+    // fprintf(stderr, "[zenoh-clock] node=%u: quantum hook entry\n", s->node_id);
+    if (!s->needs_quantum) return;
+    fprintf(stderr, "[zenoh-clock] node=%u: quantum hook processing (needs_quantum=true)\n", s->node_id);
 
     bql_lock();
     qemu_mutex_lock(&s->mutex);
@@ -100,6 +103,7 @@ static void zclock_quantum_hook(CPUState *cpu)
 
     s->needs_quantum = false;
     s->vtime_ns = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    fprintf(stderr, "[zenoh-clock] node=%u: hook signalling done (vtime=%ld)\n", s->node_id, (long)s->vtime_ns);
     s->quantum_done = true;
     qemu_cond_signal(&s->query_cond);
     bql_unlock();
@@ -151,6 +155,7 @@ static void on_query(z_loaned_query_t *query, void *context)
         return;
     }
 
+    fprintf(stderr, "[zenoh-clock] node=%u: ON_QUERY delta=%ld\n", s->node_id, (long)req.delta_ns);
     qemu_mutex_lock(&s->mutex);
     qatomic_set(&s->delta_ns, (int64_t)req.delta_ns);
     qatomic_set(&s->mujoco_time_ns, (int64_t)req.mujoco_time_ns);
@@ -161,13 +166,13 @@ static void on_query(z_loaned_query_t *query, void *context)
 
     uint32_t error_code = 0;
     /*
-     * Wait for the hook with a 2-second timeout to detect QEMU stalls.
+     * Wait for the hook with a 10-second timeout to detect QEMU stalls.
      * Must use a while loop — POSIX (and QEMU's wrapper) explicitly allows
      * spurious wakeups where timedwait returns 0 without quantum_done being
      * set.  A single if() would send a stale vtime back with error_code=0.
      */
     while (!s->quantum_done) {
-        if (qemu_cond_timedwait(&s->query_cond, &s->mutex, 2000) != 0) {
+        if (qemu_cond_timedwait(&s->query_cond, &s->mutex, 10000) != 0) {
             if (!s->quantum_done) {
                 error_code = 1; /* STALL */
             }
@@ -178,6 +183,7 @@ static void on_query(z_loaned_query_t *query, void *context)
     uint64_t vtime = (error_code == 0) ? (uint64_t)s->vtime_ns : 0;
     qemu_mutex_unlock(&s->mutex);
 
+    fprintf(stderr, "[zenoh-clock] node=%u: REPLYING vtime=%ld err=%u\n", s->node_id, (long)vtime, error_code);
     struct clock_ready_resp rep = {
         .current_vtime_ns = vtime,
         .n_frames         = 0,
@@ -213,6 +219,12 @@ static void zenoh_clock_realize(DeviceState *dev, Error **errp)
     s->quantum_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, zclock_timer_cb, s);
     virtmcu_tcg_quantum_hook = zclock_quantum_hook;
     virtmcu_get_quantum_timing = zclock_get_quantum_timing;
+
+    /* Force a CPU exit to ensure we hit the hook immediately */
+    CPUState *cpu;
+    CPU_FOREACH(cpu) {
+        cpu_exit(cpu);
+    }
 
     z_owned_config_t config;
     z_config_default(&config);

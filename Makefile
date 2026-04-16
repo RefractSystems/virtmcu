@@ -76,6 +76,9 @@ test-integration: venv
 	@echo "==> Building test artifacts..."
 	@$(MAKE) -C test/phase1
 	@$(MAKE) -C test/phase8
+	@$(MAKE) -C test/phase12
+	@$(MAKE) -C test/actuator
+	@$(MAKE) -C test/riscv
 	@echo "==> Running integration tests..."
 	@for test_script in test/*/smoke_test.sh; do \
 		echo "--> Running $$test_script"; \
@@ -114,6 +117,9 @@ test-coverage-guest: build-test-artifacts
 build-test-artifacts:
 	@$(MAKE) -C test/phase1
 	@$(MAKE) -C test/phase8
+	@$(MAKE) -C test/phase12
+	@$(MAKE) -C test/actuator
+	@$(MAKE) -C test/riscv
 
 # Run the complete test suite: unit tests, integration smoke tests, Robot tests.
 test-all: test test-integration test-robot test-coverage-guest

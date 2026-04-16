@@ -20,7 +20,7 @@ ROUTER_PID=""
 cleanup() {
     [[ -n "${QEMU_PID:-}" ]] && kill -9 "$QEMU_PID" 2>/dev/null || true
     [[ -n "${ROUTER_PID:-}" ]] && kill -9 "$ROUTER_PID" 2>/dev/null || true
-    rm -rf "$TMPDIR_LOCAL"
+    # rm -rf "$TMPDIR_LOCAL"
 }
 trap cleanup EXIT
 
@@ -30,7 +30,7 @@ SECTIONS { . = 0x40000000; .text : { *(.text) } }
 LD_EOF
 cat > "$TMPDIR_LOCAL/firmware.S" <<'ASM_EOF'
 .global _start
-_start: loop: b loop
+_start: loop: nop; b loop
 ASM_EOF
 arm-none-eabi-gcc -mcpu=cortex-a15 -nostdlib -T "$TMPDIR_LOCAL/linker.ld" "$TMPDIR_LOCAL/firmware.S" -o "$TMPDIR_LOCAL/firmware.elf"
 
