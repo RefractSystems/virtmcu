@@ -1,61 +1,61 @@
-zenoh_dir = meson.project_source_root() / '../zenoh-c'
-zenoh_lib = cc.find_library('zenohc', dirs: zenoh_dir / 'lib')
-zenoh_dep = declare_dependency(
-  dependencies: zenoh_lib,
-  compile_args: ['-I' + zenoh_dir / 'include']
-)
+# Define individual source sets for each Zenoh device to support dynamic loading via -device.
 
-# flatcc search: /usr/local (Docker/System) or ../flatcc (Local/setup-qemu.sh)
-flatcc_inc = []
-flatcc_lib_dirs = []
-flatcc_bin = find_program('flatcc', required: false)
-
-local_flatcc_dir = meson.project_source_root() / '../flatcc'
-if cc.has_header('flatcc/flatcc_builder.h')
-  # System installed
-  flatcc_inc = []
-  flatcc_lib_dirs = []
-elif cc.has_header('flatcc/flatcc_builder.h', args: '-I' + local_flatcc_dir / 'include')
-  # Local build
-  flatcc_inc = [local_flatcc_dir / 'include']
-  flatcc_lib_dirs = [local_flatcc_dir / 'lib']
-  if not flatcc_bin.found()
-    flatcc_bin = find_program(local_flatcc_dir / 'bin/flatcc')
-  endif
-endif
-
-flatcc_cargs = []
-if flatcc_inc.length() > 0
-  flatcc_cargs += ['-I' + flatcc_inc[0]]
-endif
-
-flatcc_lib = cc.find_library('flatccrt', dirs: flatcc_lib_dirs)
-flatcc_dep = declare_dependency(
-  dependencies: flatcc_lib,
-  compile_args: flatcc_cargs
-)
-
-telemetry_fbs = files('telemetry.fbs')
-telemetry_h = custom_target('telemetry_fbs',
-  input: telemetry_fbs,
-  output: ['telemetry_builder.h', 'telemetry_reader.h'],
-  command: [flatcc_bin, '-a', '-o', '@OUTDIR@', '@INPUT@']
-)
-
-zenoh_monolith_ss = ss.source_set()
-zenoh_monolith_ss.add(files('zenoh-netdev.c', 'zenoh-chardev.c', 'zenoh-actuator.c', 'zenoh-telemetry.c', 'zenoh-802154.c', 'zenoh-ui.c'))
-zenoh_monolith_ss.add(virtmcu_rust_ffi_file)
-zenoh_monolith_ss.add(zenoh_dep, flatcc_dep)
-zenoh_monolith_ss.add(telemetry_h)
-zenoh_monolith_ss.add(rust_zenoh_netdev_lib[1], rust_zenoh_chardev_lib[1], rust_zenoh_telemetry_lib[1], rust_zenoh_actuator_lib[1], rust_zenoh_802154_lib[1], rust_zenoh_ui_lib[1])
-zenoh_monolith_ss.add(declare_dependency(
-  link_args: [
-    meson.current_build_dir() / '../libzenoh_netdev.a',
-    meson.current_build_dir() / '../libzenoh_chardev.a',
-    meson.current_build_dir() / '../libzenoh_telemetry.a',
-    meson.current_build_dir() / '../libzenoh_actuator.a',
-    meson.current_build_dir() / '../libzenoh_802154.a',
-    meson.current_build_dir() / '../libzenoh_ui.a'
-  ]
+# ── zenoh-netdev ─────────────────────────────────────────────────────────────
+zenoh_netdev_ss = ss.source_set()
+zenoh_netdev_ss.add(files('zenoh-netdev.c'))
+zenoh_netdev_ss.add(virtmcu_rust_ffi_file, virtmcu_ffi_dep)
+zenoh_netdev_ss.add(rust_zenoh_netdev_lib[1])
+zenoh_netdev_ss.add(declare_dependency(
+  link_args: [meson.current_build_dir() / '../libzenoh_netdev.a']
 ))
-hw_virtmcu_modules += {'zenoh': zenoh_monolith_ss}
+hw_virtmcu_modules += {'zenoh-netdev': zenoh_netdev_ss}
+
+# ── zenoh-chardev ────────────────────────────────────────────────────────────
+zenoh_chardev_ss = ss.source_set()
+zenoh_chardev_ss.add(files('zenoh-chardev.c'))
+zenoh_chardev_ss.add(virtmcu_rust_ffi_file, virtmcu_ffi_dep)
+zenoh_chardev_ss.add(rust_zenoh_chardev_lib[1])
+zenoh_chardev_ss.add(declare_dependency(
+  link_args: [meson.current_build_dir() / '../libzenoh_chardev.a']
+))
+hw_virtmcu_modules += {'zenoh-chardev': zenoh_chardev_ss}
+
+# ── zenoh-telemetry ──────────────────────────────────────────────────────────
+zenoh_telemetry_ss = ss.source_set()
+zenoh_telemetry_ss.add(files('zenoh-telemetry.c'))
+zenoh_telemetry_ss.add(virtmcu_rust_ffi_file, virtmcu_ffi_dep)
+zenoh_telemetry_ss.add(rust_zenoh_telemetry_lib[1])
+zenoh_telemetry_ss.add(declare_dependency(
+  link_args: [meson.current_build_dir() / '../libzenoh_telemetry.a']
+))
+hw_virtmcu_modules += {'zenoh-telemetry': zenoh_telemetry_ss}
+
+# ── zenoh-actuator ───────────────────────────────────────────────────────────
+zenoh_actuator_ss = ss.source_set()
+zenoh_actuator_ss.add(files('zenoh-actuator.c'))
+zenoh_actuator_ss.add(virtmcu_rust_ffi_file, virtmcu_ffi_dep)
+zenoh_actuator_ss.add(rust_zenoh_actuator_lib[1])
+zenoh_actuator_ss.add(declare_dependency(
+  link_args: [meson.current_build_dir() / '../libzenoh_actuator.a']
+))
+hw_virtmcu_modules += {'zenoh-actuator': zenoh_actuator_ss}
+
+# ── zenoh-802154 ────────────────────────────────────────────────────────────
+zenoh_802154_ss = ss.source_set()
+zenoh_802154_ss.add(files('zenoh-802154.c'))
+zenoh_802154_ss.add(virtmcu_rust_ffi_file, virtmcu_ffi_dep)
+zenoh_802154_ss.add(rust_zenoh_802154_lib[1])
+zenoh_802154_ss.add(declare_dependency(
+  link_args: [meson.current_build_dir() / '../libzenoh_802154.a']
+))
+hw_virtmcu_modules += {'zenoh-802154': zenoh_802154_ss}
+
+# ── zenoh-ui ─────────────────────────────────────────────────────────────────
+zenoh_ui_ss = ss.source_set()
+zenoh_ui_ss.add(files('zenoh-ui.c'))
+zenoh_ui_ss.add(virtmcu_rust_ffi_file, virtmcu_ffi_dep)
+zenoh_ui_ss.add(rust_zenoh_ui_lib[1])
+zenoh_ui_ss.add(declare_dependency(
+  link_args: [meson.current_build_dir() / '../libzenoh_ui.a']
+))
+hw_virtmcu_modules += {'zenoh-ui': zenoh_ui_ss}

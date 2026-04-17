@@ -22,7 +22,7 @@ concurrency:
 
 env:
   BUILDER_IMAGE: virtmcu-builder
-  PYTHON_VERSION: "3.12"
+  PYTHON_VERSION: "3.13"
   # CI runners can be slow; raise the zenoh-clock STALL timeout so the device
   # doesn't fire on load spikes.  Local dev keeps the 5 s default for fast feedback.
   VIRTMCU_STALL_TIMEOUT_MS: "60000"
@@ -50,7 +50,7 @@ jobs:
         with:
           scandir: '.'
           severity: warning
-          ignore_paths: third_party .venv
+          ignore_paths: third_party .venv build tools/systemc_adapter/build
 
       - name: Hadolint — Dockerfile
         uses: hadolint/hadolint-action@v3.1.0
@@ -60,7 +60,16 @@ jobs:
           # DL3009: apt-get clean — handled by rm -rf /var/lib/apt/lists/*
           # DL4006: set -o pipefail — handled by set -euo pipefail in scripts
           # SC2016: $ORIGIN in single quotes is literal, which is intended for rpath
-          ignore: DL3008,DL3009,DL4006,SC2016
+          # SC2015: we use || true for sed commands
+          ignore: DL3008,DL3009,DL4006,SC2016,SC2015
+
+  check-versions:
+    name: Check Versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check version synchronization
+        run: python3 scripts/check-versions.py
 
 # ── Tier 1: Unit Tests (no QEMU) ──────────────────────────────────────────────
 
@@ -135,6 +144,10 @@ jobs:
           target: builder
           tags: ${{ env.BUILDER_IMAGE }}:${{ github.sha }}
           build-args: |
+            DEBIAN_CODENAME=${{ env.DEBIAN_CODENAME }}
+            NODE_VERSION=${{ env.NODE_VERSION }}
+            PYTHON_VERSION=${{ env.PYTHON_VERSION }}
+            ARM_TOOLCHAIN_VERSION=${{ env.ARM_TOOLCHAIN_VERSION }}
             QEMU_REF=v${{ env.QEMU_VERSION }}
             ZENOH_C_REF=${{ env.ZENOH_VERSION }}
             CMAKE_VERSION=${{ env.CMAKE_VERSION }}
@@ -175,9 +188,9 @@ jobs:
           # Phase 4: pytest + robot run directly; needs packages on PATH
           - phase: "4"
             pre: "make -C test/phase1 && uv pip install --system --break-system-packages -r pyproject.toml"
-          # Phase 8: smoke_test.sh sources .venv, so we pre-create it with uv
+          # Phase 8: robot tests
           - phase: "8"
-            pre: "make -C test/phase1 && make -C test/phase8 && uv sync"
+            pre: "make -C test/phase1 && make -C test/phase8 && uv pip install --system --break-system-packages -r pyproject.toml"
           - phase: "9"
             pre: "apt-get install -y --no-install-recommends libsystemc-dev 2>/dev/null || true && make -C test/phase1 && uv pip install --system --break-system-packages -r pyproject.toml"
           - phase: "10"
@@ -185,9 +198,9 @@ jobs:
           - phase: "11"
             pre: "make -C test/riscv"
           - phase: "11_3"
-            pre: "cmake -S tools/systemc_adapter -B tools/systemc_adapter/build -DCMAKE_BUILD_TYPE=Release && make -C tools/systemc_adapter/build rp_adapter"
+            pre: "cmake -S tools/systemc_adapter -B tools/systemc_adapter/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 && make -C tools/systemc_adapter/build rp_adapter"
           - phase: "12"
-            pre: "make -C test/phase1 && uv pip install --system --break-system-packages -r pyproject.toml"
+            pre: "make -C test/phase1 && make -C test/phase12 && uv pip install --system --break-system-packages -r pyproject.toml"
 
     steps:
       - uses: actions/checkout@v5
@@ -215,6 +228,10 @@ jobs:
           target: builder
           tags: ${{ env.BUILDER_IMAGE }}:${{ github.sha }}
           build-args: |
+            DEBIAN_CODENAME=${{ env.DEBIAN_CODENAME }}
+            NODE_VERSION=${{ env.NODE_VERSION }}
+            PYTHON_VERSION=${{ env.PYTHON_VERSION }}
+            ARM_TOOLCHAIN_VERSION=${{ env.ARM_TOOLCHAIN_VERSION }}
             QEMU_REF=v${{ env.QEMU_VERSION }}
             ZENOH_C_REF=${{ env.ZENOH_VERSION }}
             CMAKE_VERSION=${{ env.CMAKE_VERSION }}
@@ -268,6 +285,10 @@ jobs:
           target: builder
           tags: ${{ env.BUILDER_IMAGE }}:${{ github.sha }}
           build-args: |
+            DEBIAN_CODENAME=${{ env.DEBIAN_CODENAME }}
+            NODE_VERSION=${{ env.NODE_VERSION }}
+            PYTHON_VERSION=${{ env.PYTHON_VERSION }}
+            ARM_TOOLCHAIN_VERSION=${{ env.ARM_TOOLCHAIN_VERSION }}
             QEMU_REF=v${{ env.QEMU_VERSION }}
             ZENOH_C_REF=${{ env.ZENOH_VERSION }}
             CMAKE_VERSION=${{ env.CMAKE_VERSION }}
@@ -322,6 +343,10 @@ jobs:
           target: builder
           tags: ${{ env.BUILDER_IMAGE }}:${{ github.sha }}
           build-args: |
+            DEBIAN_CODENAME=${{ env.DEBIAN_CODENAME }}
+            NODE_VERSION=${{ env.NODE_VERSION }}
+            PYTHON_VERSION=${{ env.PYTHON_VERSION }}
+            ARM_TOOLCHAIN_VERSION=${{ env.ARM_TOOLCHAIN_VERSION }}
             QEMU_REF=v${{ env.QEMU_VERSION }}
             ZENOH_C_REF=${{ env.ZENOH_VERSION }}
             CMAKE_VERSION=${{ env.CMAKE_VERSION }}
@@ -375,6 +400,10 @@ jobs:
           target: builder
           tags: ${{ env.BUILDER_IMAGE }}:${{ github.sha }}
           build-args: |
+            DEBIAN_CODENAME=${{ env.DEBIAN_CODENAME }}
+            NODE_VERSION=${{ env.NODE_VERSION }}
+            PYTHON_VERSION=${{ env.PYTHON_VERSION }}
+            ARM_TOOLCHAIN_VERSION=${{ env.ARM_TOOLCHAIN_VERSION }}
             QEMU_REF=v${{ env.QEMU_VERSION }}
             ZENOH_C_REF=${{ env.ZENOH_VERSION }}
             CMAKE_VERSION=${{ env.CMAKE_VERSION }}
@@ -431,6 +460,10 @@ jobs:
           target: builder
           tags: ${{ env.BUILDER_IMAGE }}:${{ github.sha }}
           build-args: |
+            DEBIAN_CODENAME=${{ env.DEBIAN_CODENAME }}
+            NODE_VERSION=${{ env.NODE_VERSION }}
+            PYTHON_VERSION=${{ env.PYTHON_VERSION }}
+            ARM_TOOLCHAIN_VERSION=${{ env.ARM_TOOLCHAIN_VERSION }}
             QEMU_REF=v${{ env.QEMU_VERSION }}
             ZENOH_C_REF=${{ env.ZENOH_VERSION }}
             CMAKE_VERSION=${{ env.CMAKE_VERSION }}
@@ -487,6 +520,10 @@ jobs:
           target: builder
           tags: ${{ env.BUILDER_IMAGE }}:${{ github.sha }}
           build-args: |
+            DEBIAN_CODENAME=${{ env.DEBIAN_CODENAME }}
+            NODE_VERSION=${{ env.NODE_VERSION }}
+            PYTHON_VERSION=${{ env.PYTHON_VERSION }}
+            ARM_TOOLCHAIN_VERSION=${{ env.ARM_TOOLCHAIN_VERSION }}
             QEMU_REF=v${{ env.QEMU_VERSION }}
             ZENOH_C_REF=${{ env.ZENOH_VERSION }}
             CMAKE_VERSION=${{ env.CMAKE_VERSION }}
@@ -556,6 +593,10 @@ jobs:
           target: builder
           tags: ${{ env.BUILDER_IMAGE }}:${{ github.sha }}
           build-args: |
+            DEBIAN_CODENAME=${{ env.DEBIAN_CODENAME }}
+            NODE_VERSION=${{ env.NODE_VERSION }}
+            PYTHON_VERSION=${{ env.PYTHON_VERSION }}
+            ARM_TOOLCHAIN_VERSION=${{ env.ARM_TOOLCHAIN_VERSION }}
             QEMU_REF=v${{ env.QEMU_VERSION }}
             ZENOH_C_REF=${{ env.ZENOH_VERSION }}
             CMAKE_VERSION=${{ env.CMAKE_VERSION }}
@@ -614,6 +655,10 @@ jobs:
           target: runtime
           tags: virtmcu-runtime:${{ github.sha }}
           build-args: |
+            DEBIAN_CODENAME=${{ env.DEBIAN_CODENAME }}
+            NODE_VERSION=${{ env.NODE_VERSION }}
+            PYTHON_VERSION=${{ env.PYTHON_VERSION }}
+            ARM_TOOLCHAIN_VERSION=${{ env.ARM_TOOLCHAIN_VERSION }}
             QEMU_REF=v${{ env.QEMU_VERSION }}
             ZENOH_C_REF=${{ env.ZENOH_VERSION }}
             CMAKE_VERSION=${{ env.CMAKE_VERSION }}
@@ -630,6 +675,10 @@ jobs:
           target: builder
           tags: ${{ env.BUILDER_IMAGE }}:${{ github.sha }}
           build-args: |
+            DEBIAN_CODENAME=${{ env.DEBIAN_CODENAME }}
+            NODE_VERSION=${{ env.NODE_VERSION }}
+            PYTHON_VERSION=${{ env.PYTHON_VERSION }}
+            ARM_TOOLCHAIN_VERSION=${{ env.ARM_TOOLCHAIN_VERSION }}
             QEMU_REF=v${{ env.QEMU_VERSION }}
             ZENOH_C_REF=${{ env.ZENOH_VERSION }}
             CMAKE_VERSION=${{ env.CMAKE_VERSION }}
@@ -674,6 +723,10 @@ jobs:
           target: builder
           tags: ${{ env.BUILDER_IMAGE }}:${{ github.sha }}
           build-args: |
+            DEBIAN_CODENAME=${{ env.DEBIAN_CODENAME }}
+            NODE_VERSION=${{ env.NODE_VERSION }}
+            PYTHON_VERSION=${{ env.PYTHON_VERSION }}
+            ARM_TOOLCHAIN_VERSION=${{ env.ARM_TOOLCHAIN_VERSION }}
             QEMU_REF=v${{ env.QEMU_VERSION }}
             ZENOH_C_REF=${{ env.ZENOH_VERSION }}
             CMAKE_VERSION=${{ env.CMAKE_VERSION }}
@@ -692,8 +745,9 @@ jobs:
             -e PYTHONPATH=/workspace \
             -e VIRTMCU_STALL_TIMEOUT_MS \
             ${{ env.BUILDER_IMAGE }}:${{ github.sha }} \
-            bash -c "
+            bash -c '
               # Pre-build all artifacts
+              apt-get update && apt-get install -y --no-install-recommends libsystemc-dev
               make -C test/phase1
               make -C test/phase8
               uv pip install --system --break-system-packages -r pyproject.toml pytest-cov
@@ -707,12 +761,13 @@ jobs:
               pytest tools/testing/test_qmp.py -v
 
               # Generate report for our plugins only (under hw/virtmcu)
+              mkdir -p /workspace/test-results
               cd /build/qemu
               gcovr -r /build/qemu/hw/virtmcu \
                 --xml /workspace/test-results/peripheral-coverage.xml \
                 --html-details /workspace/test-results/peripheral-coverage.html \
                 --print-summary
-            "
+            '
 
       - name: Upload peripheral coverage results
         uses: actions/upload-artifact@v6
@@ -747,6 +802,10 @@ jobs:
           target: builder
           tags: ${{ env.BUILDER_IMAGE }}:${{ github.sha }}
           build-args: |
+            DEBIAN_CODENAME=${{ env.DEBIAN_CODENAME }}
+            NODE_VERSION=${{ env.NODE_VERSION }}
+            PYTHON_VERSION=${{ env.PYTHON_VERSION }}
+            ARM_TOOLCHAIN_VERSION=${{ env.ARM_TOOLCHAIN_VERSION }}
             QEMU_REF=v${{ env.QEMU_VERSION }}
             ZENOH_C_REF=${{ env.ZENOH_VERSION }}
             CMAKE_VERSION=${{ env.CMAKE_VERSION }}
@@ -763,14 +822,21 @@ jobs:
             -e PYTHONPATH=/workspace \
             -e VIRTMCU_STALL_TIMEOUT_MS \
             ${{ env.BUILDER_IMAGE }}:${{ github.sha }} \
-            bash -c "
+            bash -c '
               make -C test/phase1
-              uv pip install pyelftools
+              uv pip install --system --break-system-packages pyelftools
+              # Find drcov plugin (priority: installed prefix, then build tree)
+              DRCOV_SO=$(find /opt/virtmcu/lib/qemu/plugins /build/qemu -name "libdrcov.so" 2>/dev/null | head -n 1)
+              if [ -z "$DRCOV_SO" ]; then
+                echo "Error: libdrcov.so not found in /opt/virtmcu or /build/qemu"
+                exit 1
+              fi
+              echo "Using drcov plugin: $DRCOV_SO"
               # Run with drcov plugin
               qemu-system-arm -M arm-generic-fdt,hw-dtb=test/phase1/minimal.dtb \
                 -kernel test/phase1/hello.elf -nographic -m 128M -display none \
-                -plugin /build/qemu/build-virtmcu/contrib/plugins/libdrcov.so,filename=hello.drcov \
+                -plugin "$DRCOV_SO",filename=hello.drcov \
                 -d plugin
               # Analyze results
               python3 tools/analyze_coverage.py hello.drcov test/phase1/hello.elf --fail-under 80
-            "
+            '

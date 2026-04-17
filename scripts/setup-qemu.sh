@@ -19,6 +19,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_DIR="$(dirname "$SCRIPT_DIR")"
 QEMU_DIR="$WORKSPACE_DIR/third_party/qemu"
 
+# Check if QEMU is already pre-installed in the container image
+if [ -x "/opt/virtmcu/bin/qemu-system-arm" ] && [ "$1" != "--force" ] && [ ! -d "$QEMU_DIR" ]; then
+    echo "==> QEMU is already pre-installed in this environment (/opt/virtmcu/bin)."
+    echo "    'make run' and integration tests will work immediately."
+    echo ""
+    echo "    If you want to modify QEMU C code or add new peripherals in hw/,"
+    echo "    run: ./scripts/setup-qemu.sh --force"
+    echo ""
+    exit 0
+fi
+
 if [ -f "$WORKSPACE_DIR/VERSIONS" ]; then
     source "$WORKSPACE_DIR/VERSIONS"
 fi
@@ -26,7 +37,7 @@ fi
 
 # Clone QEMU if not already present
 QEMU_REPO="${QEMU_REPO:-https://gitlab.com/qemu-project/qemu.git}"
-QEMU_REF="${QEMU_REF:-v${QEMU_VERSION:-11.0.0-rc3}}"
+QEMU_REF="${QEMU_REF:-v${QEMU_VERSION:-11.0.0-rc4}}"
 
 if [ ! -d "$QEMU_DIR/.git" ]; then
     echo "==> Cloning QEMU ${QEMU_REF} from ${QEMU_REPO} ..."
@@ -39,7 +50,7 @@ fi
 
 cd "$QEMU_DIR"
 
-# Ensure we are on the expected QEMU version (11.0.0-rc3)
+# Ensure we are on the expected QEMU version (11.0.0-rc4)
 VERSION=$(cat VERSION || echo "")
 if [[ "$VERSION" != *"10.2.9"* ]] && [[ "$VERSION" != *"11.0.0-rc"* ]]; then
     echo "Unexpected QEMU version: $VERSION"
@@ -155,11 +166,12 @@ mkdir -p build-virtmcu
 cd build-virtmcu
 
 # Configure the build, handling macOS specific plugin bugs (GitLab #516)
+# Phase 18: Enable --enable-rust for native QOM plugins
 if [ "$(uname)" = "Darwin" ]; then
     echo "macOS detected: disabling --enable-plugins to avoid GLib module conflicts"
-    ../configure --enable-modules --enable-fdt --enable-debug --enable-gcov --target-list=arm-softmmu,arm-linux-user,riscv32-softmmu,riscv64-softmmu,riscv32-linux-user,riscv64-linux-user --prefix="$(pwd)/install"
+    ../configure --enable-rust --enable-modules --enable-fdt --enable-debug --enable-gcov --target-list=arm-softmmu,arm-linux-user,riscv32-softmmu,riscv64-softmmu,riscv32-linux-user,riscv64-linux-user --prefix="$(pwd)/install"
 else
-    ../configure --enable-modules --enable-fdt --enable-plugins --enable-debug --enable-gcov --target-list=arm-softmmu,arm-linux-user,riscv32-softmmu,riscv64-softmmu,riscv32-linux-user,riscv64-linux-user --prefix="$(pwd)/install"
+    ../configure --enable-rust --enable-modules --enable-fdt --enable-plugins --enable-debug --enable-gcov --target-list=arm-softmmu,arm-linux-user,riscv32-softmmu,riscv64-softmmu,riscv32-linux-user,riscv64-linux-user --prefix="$(pwd)/install"
 fi
 
 # Compile QEMU using all available CPU cores

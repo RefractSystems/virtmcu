@@ -212,7 +212,7 @@ EtherBone packets, and sends them over UDP — mirroring Renode's `EtherBoneBrid
 
 ### Version and Patches
 
-- **Base**: QEMU 11.0.0-rc3 (internally versioned as 10.2.92; git tag `v11.0.0-rc3`)
+- **Base**: QEMU 11.0.0-rc4 (internally versioned as 10.2.92; git tag `v11.0.0-rc4`)
 - **Patches applied in order by `scripts/setup-qemu.sh`**:
   1. `patches/arm-generic-fdt-v3.mbx` — 33-patch series (patchew ID
      `20260402215629.745866-1-ruslichenko.r@gmail.com`), applied via `git am`
@@ -502,3 +502,7 @@ Because Python's Global Interpreter Lock (GIL) and garbage collector introduce m
 
 ### 4. Where to Ask for Help
 If a QEMU macro like `OBJECT_DECLARE_SIMPLE_TYPE` confuses you, look at `hw/dummy/dummy.c`. We intentionally keep a heavily commented "dummy" peripheral in the tree as a learning template. Never copy-paste complex QEMU upstream code without understanding it; start from the dummy device and build up.
+
+## Related Reference Documents
+* [Zenoh Topic Map](ZENOH_TOPIC_MAP.md) - A definitive map of all Zenoh channels/topics in the federation.
+* [Timing Model](TIMING_MODEL.md) - How virtual time is synchronized.

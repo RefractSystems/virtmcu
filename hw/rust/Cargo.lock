@@ -3658,6 +3658,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "zenoh-clock"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "zenoh",
+]
+
+[[package]]
 name = "zenoh-codec"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3963,6 +3971,7 @@ name = "zenoh-netdev"
 version = "0.1.0"
 dependencies = [
  "byteorder",
+ "crossbeam-channel",
  "libc",
  "virtmcu-qom",
  "zenoh",
@@ -4062,7 +4071,6 @@ dependencies = [
  "crossbeam-channel",
  "flatbuffers",
  "libc",
- "virtmcu-qom",
  "zenoh",
 ]
 
@@ -4136,15 +4144,6 @@ dependencies = [
  "winapi",
  "zenoh-core",
  "zenoh-result",
-]
-
-[[package]]
-name = "zenoh_clock"
-version = "0.1.0"
-dependencies = [
- "libc",
- "virtmcu-qom",
- "zenoh",
 ]
 
 [[package]]

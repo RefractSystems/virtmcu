@@ -1,5 +1,5 @@
 [package]
-name = "zenoh_clock"
+name = "zenoh-clock"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -8,6 +8,5 @@ authors.workspace = true
 crate-type = ["staticlib"]
 
 [dependencies]
-zenoh = "1.0.0"
-virtmcu-qom = { path = "../virtmcu-qom" }
-libc = "0.2"
+zenoh.workspace = true
+libc.workspace = true

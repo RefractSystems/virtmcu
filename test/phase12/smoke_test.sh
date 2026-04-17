@@ -18,9 +18,19 @@ function log_fail() {
     exit 1
 }
 
+# Initialize PIDs to 0 to avoid 'unbound variable' errors in cleanup
+BRIDGE_PID=0
+LISTENER_PID=0
+COORD_PID=0
+NEW_LISTENER_PID=0
+MOCK_PID=0
+
 function cleanup() {
-    kill "$BRIDGE_PID" 2>/dev/null || true
-    kill "$LISTENER_PID" 2>/dev/null || true
+    [[ $BRIDGE_PID -ne 0 ]] && kill "$BRIDGE_PID" 2>/dev/null || true
+    [[ $LISTENER_PID -ne 0 ]] && kill "$LISTENER_PID" 2>/dev/null || true
+    [[ $COORD_PID -ne 0 ]] && kill "$COORD_PID" 2>/dev/null || true
+    [[ $NEW_LISTENER_PID -ne 0 ]] && kill "$NEW_LISTENER_PID" 2>/dev/null || true
+    [[ $MOCK_PID -ne 0 ]] && kill "$MOCK_PID" 2>/dev/null || true
     rm -f /tmp/bridge_listener_$$.py /tmp/mmio.sock
 }
 trap cleanup EXIT
@@ -145,9 +155,9 @@ LOG_ZCLOCK="test/phase12/zclock_error.log"
 echo "Starting QEMU with invalid zenoh-clock router..."
 # We don't need a valid kernel or DTB for this, QEMU should fail during device realization
 # But we need at least some machine to attach the device to.
-timeout -s KILL 2s "$WORKSPACE_DIR/scripts/run.sh" \
+timeout -s KILL 5s "$WORKSPACE_DIR/scripts/run.sh" \
     --dtb "test/phase12/test_telemetry.dtb" \
-    -device zenoh-clock-rust,node=1,router=tcp/127.0.0.1:1,mode=slaved-suspend \
+    -device zenoh-clock,node=1,router=tcp/127.0.0.1:1,mode=slaved-suspend \
     -nographic -serial null -monitor null > "$LOG_ZCLOCK" 2>&1 || true
 
 echo "=== zenoh-clock Error Log ==="

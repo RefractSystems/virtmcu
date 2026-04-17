@@ -161,10 +161,19 @@ if [ "$MACHINE_PROVIDED" = false ]; then
     fi
 fi
 
-# Set the QEMU module directory
+# Set the QEMU module directory. 
+# Prioritize the build directory for developers, fallback to installed location.
 FOUND_SO=$(find "$QEMU_DIR/build-virtmcu/install" -name "hw-virtmcu-*.so" -type f 2>/dev/null | head -n1)
 if [ -n "$FOUND_SO" ]; then
     QEMU_MODULE_DIR=$(dirname "$FOUND_SO")
+elif [ -d "$QEMU_DIR/build-virtmcu/install/lib/qemu" ]; then
+    QEMU_MODULE_DIR="$QEMU_DIR/build-virtmcu/install/lib/qemu"
+elif [ -d "/opt/virtmcu/lib/aarch64-linux-gnu/qemu" ]; then
+    QEMU_MODULE_DIR="/opt/virtmcu/lib/aarch64-linux-gnu/qemu"
+elif [ -d "/opt/virtmcu/lib/x86_64-linux-gnu/qemu" ]; then
+    QEMU_MODULE_DIR="/opt/virtmcu/lib/x86_64-linux-gnu/qemu"
+elif [ -d "/opt/virtmcu/lib/qemu" ]; then
+    QEMU_MODULE_DIR="/opt/virtmcu/lib/qemu"
 else
     QEMU_MODULE_DIR="$QEMU_DIR/build-virtmcu/install/lib/qemu"
 fi

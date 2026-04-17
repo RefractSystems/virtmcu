@@ -17,7 +17,7 @@ QEMU_BUILD?= $(QEMU_SRC)/build-virtmcu
 # Automatically determine the number of parallel jobs for make
 JOBS      ?= $(shell nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
 
-.PHONY: all setup build run clean distclean venv test test-unit test-robot test-all lint fmt install-hooks sync-versions
+.PHONY: all setup build run clean distclean venv test test-unit test-robot test-all lint fmt install-hooks sync-versions check-versions docker-dev docker-all docker-base docker-toolchain docker-devenv docker-builder docker-runtime ci-local ci-full
 
 # By default, perform an incremental build
 all: build
@@ -31,6 +31,11 @@ sync-versions:
 	@echo "==> Synchronizing dependency versions..."
 	@python3 scripts/sync-versions.py
 	@echo "✓ Versions synchronized."
+
+# Verify that all versions are in sync across the codebase.
+check-versions:
+	@echo "==> Checking version synchronization..."
+	@python3 scripts/check-versions.py
 
 # ------------------------------------------------------------------------------
 # Build Targets
@@ -144,10 +149,17 @@ test-all: test test-integration test-robot test-coverage-guest
 # ------------------------------------------------------------------------------
 
 # Check Python style (same rules as CI).
-lint: venv
+lint: venv check-versions lint-cargo
 	@echo "==> ruff check..."
 	uv run ruff check tools/ tests/ patches/
 	@echo "✓ Lint passed."
+
+# Check Cargo workspace versions.
+lint-cargo:
+	@echo "==> Checking Cargo workspace version synchronization..."
+	@cd hw/rust && cargo metadata --no-deps --format-version 1 | \
+		python3 -c "import sys,json; m=json.load(sys.stdin); vs=set(p['version'] for p in m['packages']); assert len(vs)==1, f'version drift: {vs}'"
+	@echo "✓ Cargo workspace versions aligned."
 
 # Auto-fix formatting and fixable lint errors.
 fmt: venv
@@ -166,6 +178,130 @@ install-hooks:
 	@echo "✓ pre-push hook installed (make lint will run on every push)."
 
 # ------------------------------------------------------------------------------
+# Local CI Simulation
+# Mirrors the GitHub CI tier structure so you can validate locally before push.
+#
+#   make ci-local   — Tier 1 (lint + check-versions + unit tests) +
+#                     Tier 2 (base → toolchain → devenv Docker builds with smoke tests)
+#                     ~10 min with warm Docker cache; ~15 min cold.
+#                     Covers every CI check that does NOT require the full QEMU build.
+#
+#   make ci-full    — ci-local + builder stage (QEMU compile, ~40 min cold) +
+#                     runtime image + representative phase smoke tests inside container.
+#                     This is the closest local equivalent to the full GitHub CI run.
+#
+# Gaps vs GitHub CI (tools not installed locally):
+#   shellcheck — install with: brew install shellcheck
+#   hadolint   — install with: brew install hadolint
+# Both are skipped with a warning if absent; install them for full parity.
+# ------------------------------------------------------------------------------
+
+ci-local: venv check-versions
+	@echo ""
+	@echo "════════════════════════════════════════════════════"
+	@echo "  CI Tier 1 — Lint"
+	@echo "════════════════════════════════════════════════════"
+	@echo "==> ruff check..."
+	uv run ruff check tools/ tests/ patches/
+	@echo "==> shellcheck..."
+	@if command -v shellcheck >/dev/null 2>&1; then \
+		shellcheck --severity=warning scripts/*.sh; \
+		echo "✓ shellcheck passed."; \
+	else \
+		echo "  WARNING: shellcheck not installed (brew install shellcheck) — skipping."; \
+	fi
+	@echo "==> hadolint..."
+	@if command -v hadolint >/dev/null 2>&1; then \
+		hadolint --ignore DL3008 --ignore DL3009 --ignore DL4006 --ignore SC2016 --ignore SC2015 --ignore DL3002 --ignore DL3016 docker/Dockerfile; \
+		echo "✓ hadolint passed."; \
+	else \
+		echo "  WARNING: hadolint not installed (brew install hadolint) — skipping."; \
+	fi
+	@echo ""
+	@echo "════════════════════════════════════════════════════"
+	@echo "  CI Tier 1 — Unit Tests (no QEMU)"
+	@echo "════════════════════════════════════════════════════"
+	uv run pytest \
+		tests/repl2qemu/ \
+		tests/test_yaml2qemu.py \
+		tests/test_cli_generator.py \
+		tests/test_fdt_emitter.py \
+		-v --tb=short
+	@echo ""
+	@echo "════════════════════════════════════════════════════"
+	@echo "  CI Tier 2 — Docker: base → toolchain → devenv"
+	@echo "════════════════════════════════════════════════════"
+	@bash scripts/docker-build.sh dev
+	@echo ""
+	@echo "✓ ci-local passed."
+	@echo "  To run the full pipeline (builder ~40 min + integration tests): make ci-full"
+
+ci-full: ci-local
+	@echo ""
+	@echo "════════════════════════════════════════════════════"
+	@echo "  CI Full — Docker: builder + runtime"
+	@echo "════════════════════════════════════════════════════"
+	@bash scripts/docker-build.sh builder
+	@bash scripts/docker-build.sh runtime
+	@echo ""
+	@echo "════════════════════════════════════════════════════"
+	@echo "  CI Full — Integration smoke tests (inside builder)"
+	@echo "════════════════════════════════════════════════════"
+	@echo "  Running Phase 1 (ARM bare-metal boot)..."
+	docker run --rm \
+		-v "$(CURDIR):/workspace" -w /workspace \
+		-e PYTHONPATH=/workspace \
+		-e VIRTMCU_STALL_TIMEOUT_MS=60000 \
+		virtmcu-builder:dev \
+		bash -c "make -C test/phase1 && bash test/phase1/smoke_test.sh"
+	@echo "  Running pytest unit tests inside builder..."
+	docker run --rm \
+		-v "$(CURDIR):/workspace" -w /workspace \
+		-e PYTHONPATH=/workspace \
+		virtmcu-builder:dev \
+		bash -c "uv pip install --system --break-system-packages -r pyproject.toml && \
+		         python3 -m pytest tests/repl2qemu/ tests/test_yaml2qemu.py \
+		                        tests/test_cli_generator.py tests/test_fdt_emitter.py \
+		                        -v --tb=short"
+	@echo ""
+	@echo "✓ ci-full passed."
+	@echo "  NOTE: Phase 4-16 smoke tests, pytest-qmp, and Robot Framework"
+	@echo "  require additional test artifacts. Run them individually:"
+	@echo "    docker run --rm -v \"\$$(pwd):/workspace\" -w /workspace -e PYTHONPATH=/workspace \\"
+	@echo "      virtmcu-builder:dev bash -c \"<pre> && bash test/phaseN/smoke_test.sh\""
+
+# ------------------------------------------------------------------------------
+# Docker Image Targets
+# ------------------------------------------------------------------------------
+# All versions are read from the VERSIONS file by scripts/docker-build.sh.
+# Pass IMAGE_TAG=<tag> to override the local tag (default: dev).
+#
+#   make docker-dev    — base → toolchain → devenv with smoke tests (fast path)
+#   make docker-all    — full pipeline including builder (~40 min) and runtime
+#   make docker-base   — build a single stage (no smoke test, for debugging)
+
+docker-dev:
+	@bash scripts/docker-build.sh dev
+
+docker-all:
+	@bash scripts/docker-build.sh all
+
+docker-base:
+	@bash scripts/docker-build.sh base
+
+docker-toolchain:
+	@bash scripts/docker-build.sh toolchain
+
+docker-devenv:
+	@bash scripts/docker-build.sh devenv
+
+docker-builder:
+	@bash scripts/docker-build.sh builder
+
+docker-runtime:
+	@bash scripts/docker-build.sh runtime
+
+# ------------------------------------------------------------------------------
 # Clean
 # ------------------------------------------------------------------------------
 
@@ -179,6 +315,7 @@ clean:
 	rm -rf tools/cyber_bridge/build
 	rm -rf tools/systemc_adapter/build
 	rm -rf tools/zenoh_coordinator/target
+	rm -rf hw/rust/target
 	@echo "✓ Clean complete (QEMU sources and .venv remain)."
 
 # Deep clean: completely remove downloaded sources, virtual environments, and all artifacts.
