@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import pytest
 
@@ -12,7 +13,7 @@ def test_dynamic_devices_realization():
     fail to boot (e.g., 'Property not found').
     """
     yaml_path = "test/phase12/test_bridge.yaml"
-    if not os.path.exists(yaml_path):
+    if not Path(yaml_path).exists():
         pytest.skip(f"{yaml_path} not found")
 
     lib = QemuLibrary()
@@ -22,12 +23,12 @@ def test_dynamic_devices_realization():
             yaml_path, kernel_path=None, extra_args=["-S", "-device", "zenoh-clock,mode=suspend,node=0"]
         )
 
-        assert os.path.exists(qmp_sock)
+        assert Path(qmp_sock).exists()
         try:
             lib.connect_to_qemu(qmp_sock, uart_sock)
         except Exception as e:
             if lib.proc and lib.proc.poll() is not None:
-                out, err = lib.proc.communicate(timeout=5)
+                out, err = lib.proc.communicate(timeout=5)  # noqa: RUF059
                 pytest.fail(f"QEMU crashed during startup. STDERR: {err.decode('utf-8')}")
             raise e
 
@@ -41,7 +42,7 @@ def test_dynamic_devices_realization():
             import signal
 
             os.killpg(os.getpgid(lib.proc.pid), signal.SIGTERM)
-            out, err = lib.proc.communicate(timeout=5)
+            _out, err = lib.proc.communicate(timeout=5)
             err_str = err.decode("utf-8")
 
         # BQL warning check (the other issue reported)

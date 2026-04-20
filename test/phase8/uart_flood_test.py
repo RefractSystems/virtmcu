@@ -11,6 +11,7 @@ session = zenoh.open(conf)
 
 print("[UART Flood] Connected to Zenoh.")
 
+
 def publish_chardev():
     pub = session.declare_publisher("sim/chardev/0/rx")
 
@@ -23,6 +24,7 @@ def publish_chardev():
 
     print("[UART Flood] Blast complete. Awaiting crash or stability...")
     time.sleep(2)
+
 
 t1 = threading.Thread(target=publish_chardev)
 t1.start()

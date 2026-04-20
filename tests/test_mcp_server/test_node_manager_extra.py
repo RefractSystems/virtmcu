@@ -1,4 +1,4 @@
-import os
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -32,7 +32,7 @@ peripherals: []
     # Given the previous tests, it seems it's better to mock it for unit tests.
     with patch("tools.yaml2qemu.main") as mock_main:
         await manager.provision_board("good_node", valid_yaml, "yaml")
-        assert os.path.exists(manager.get_node("good_node").yaml_path)
+        assert Path(manager.get_node("good_node").yaml_path).exists()
         mock_main.assert_called_once()
 
 

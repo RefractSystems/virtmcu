@@ -1,30 +1,40 @@
-import os
 import struct
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import zenoh
 
 WORKSPACE_DIR = "/workspace"
 
+
 def pack_zenoh_frame(vtime_ns: int, data: bytes) -> bytes:
     header = struct.pack("<QI", vtime_ns, len(data))
     return header + data
 
+
 def main():
     print("Starting Zenoh router...")
-    router_proc = subprocess.Popen([sys.executable, os.path.join(WORKSPACE_DIR, "tests", "zenoh_router_persistent.py"), "tcp/127.0.0.1:7448"])
+    router_proc = subprocess.Popen(
+        [sys.executable, (Path(WORKSPACE_DIR) / "tests" / "zenoh_router_persistent.py"), "tcp/127.0.0.1:7448"]
+    )
     time.sleep(2)
 
     print("Starting QEMU...")
     qemu_cmd = [
-        os.path.join(WORKSPACE_DIR, "scripts", "run.sh"),
-        "--dtb", os.path.join(WORKSPACE_DIR, "test-results", "netdev_determinism", "board.dtb"),
-        "-kernel", os.path.join(WORKSPACE_DIR, "test-results", "netdev_determinism", "firmware.elf"),
-        "-icount", "shift=0,align=off,sleep=off",
-        "-netdev", "zenoh,id=net0,node=0,router=tcp/127.0.0.1:7448",
-        "-nographic", "-monitor", "none"
+        Path(WORKSPACE_DIR) / "scripts" / "run.sh",
+        "--dtb",
+        Path(WORKSPACE_DIR) / "test-results" / "netdev_determinism" / "board.dtb",
+        "-kernel",
+        Path(WORKSPACE_DIR) / "test-results" / "netdev_determinism" / "firmware.elf",
+        "-icount",
+        "shift=0,align=off,sleep=off",
+        "-netdev",
+        "zenoh,id=net0,node=0,router=tcp/127.0.0.1:7448",
+        "-nographic",
+        "-monitor",
+        "none",
     ]
 
     qemu_proc = subprocess.Popen(qemu_cmd, stderr=subprocess.PIPE, text=True)
@@ -40,11 +50,11 @@ def main():
     rx_topic = "sim/eth/frame/0/rx"
 
     print("Injecting 1000 packets out of order...")
-    base_time = 1_000_000_000 # 1 second in ns
+    base_time = 1_000_000_000  # 1 second in ns
     for i in range(1000):
         # Reverse order: first packet sent has the largest vtime
         vtime = base_time + (1000 - i) * 1000
-        data = f"PACKET_{i}".encode("utf-8")
+        data = f"PACKET_{i}".encode()
         session.put(rx_topic, pack_zenoh_frame(vtime, data))
 
     print("Waiting for deliveries...")
@@ -56,7 +66,7 @@ def main():
             break
         if "[virtmcu-netdev] RX deliver" in line:
             parts = line.split()
-            vtime_str = [p for p in parts if p.startswith("vtime=")][0]
+            vtime_str = next(p for p in parts if p.startswith("vtime="))
             vtime = int(vtime_str.split("=")[1])
             delivered_vtimes.append(vtime)
             if len(delivered_vtimes) == 1000:
@@ -77,6 +87,7 @@ def main():
     else:
         print("FAIL: Packets delivered out of order!")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

@@ -1,11 +1,12 @@
-import os
 import subprocess
 import time
+from pathlib import Path
 
 from mmio_client import MMIOClient
 
 ADAPTER_PATH = "./tools/systemc_adapter/build/adapter"
 SOCKET_PATH = "/tmp/error_test.sock"
+
 
 def run_adapter(node_id=""):
     cmd = [ADAPTER_PATH, SOCKET_PATH]
@@ -13,18 +14,20 @@ def run_adapter(node_id=""):
         cmd.append(node_id)
     return subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
+
 def connect_to_adapter(path, timeout=5):
     start = time.time()
     while time.time() - start < timeout:
-        if os.path.exists(path):
+        if Path(path).exists():
             try:
                 client = MMIOClient(path)
                 client.connect()
                 return client
-            except:
+            except Exception:
                 pass
         time.sleep(0.5)
     return None
+
 
 def test_invalid_mmio_size():
     print("--- Testing Invalid MMIO Sizes ---")
@@ -60,6 +63,7 @@ def test_invalid_mmio_size():
         adapter.terminate()
         adapter.wait()
 
+
 def test_abrupt_disconnect():
     print("--- Testing Abrupt Disconnect ---")
     adapter = run_adapter()
@@ -92,6 +96,7 @@ def test_abrupt_disconnect():
     finally:
         adapter.terminate()
         adapter.wait()
+
 
 if __name__ == "__main__":
     test_invalid_mmio_size()

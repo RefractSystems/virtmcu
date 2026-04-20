@@ -1,0 +1,17 @@
+name: lin_test
+cpu: cortex-m4
+memory:
+  - name: ram
+    address: 0x20000000
+    size: 0x10000
+  - name: flash
+    address: 0x00000000
+    size: 0x10000
+peripherals:
+  - name: lpuart0
+    type: s32k144-lpuart
+    address: 0x4006A000
+    interrupts: [31]
+    properties:
+      node: 0
+      topic: "sim/lin"

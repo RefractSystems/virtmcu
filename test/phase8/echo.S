@@ -40,7 +40,11 @@ wait_rx:
     // 3. Echo it back
     bl putc
 
-    // 4. If character is '\r' (CR), also send '\n' (LF)
+    // 4. Check for ESC character (\x1B) to trigger clean exit for coverage
+    cmp r0, #27
+    beq do_exit
+
+    // 5. If character is '\r' (CR), also send '\n' (LF)
     cmp r0, #13
     bne loop
     mov r0, #10
@@ -59,6 +63,13 @@ wait_tx:
     ldr r2, =UART0_DR
     str r0, [r2]
     bx lr
+
+do_exit:
+    /* ARM Semihosting Exit: SYS_EXIT (0x18) with ApplicationExit (0x20026) */
+    mov r0, #0x18
+    ldr r1, =0x20026
+    svc #0x123456
+    b loop
 
 .section .data
 welcome_msg:

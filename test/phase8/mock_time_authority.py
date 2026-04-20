@@ -8,9 +8,11 @@ import zenoh
 def pack_clock_advance(delta_ns, mujoco_time_ns=0):
     return struct.pack("<QQ", delta_ns, mujoco_time_ns)
 
+
 def unpack_clock_ready(data):
     # current_vtime_ns (Q), n_frames (I), error_code (I)
     return struct.unpack("<QII", data)
+
 
 def main():
     router = sys.argv[1] if len(sys.argv) > 1 else "tcp/127.0.0.1:7447"
@@ -22,8 +24,8 @@ def main():
     print("[TimeAuthority] Advancing clock on sim/clock/advance/0...")
 
     # Advance 2 seconds in 10ms quanta
-    QUANTA_NS = 10_000_000
-    TOTAL_NS = 2_000_000_000
+    QUANTA_NS = 10_000_000  # noqa: N806
+    TOTAL_NS = 2_000_000_000  # noqa: N806
 
     current_vtime = 0
     while current_vtime < TOTAL_NS:
@@ -36,6 +38,7 @@ def main():
 
     print("[TimeAuthority] Reached target virtual time.")
     session.close()
+
 
 if __name__ == "__main__":
     main()

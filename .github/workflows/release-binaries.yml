@@ -25,16 +25,16 @@ jobs:
             platform: linux/arm64
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Load VERSIONS
-        run: cat VERSIONS | grep -v '^#' | grep -v '^$' >> $GITHUB_ENV
+        run: grep -E -v '^#|^$' VERSIONS >> "$GITHUB_ENV"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build builder stage
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/Dockerfile
@@ -46,39 +46,39 @@ jobs:
             CMAKE_VERSION=${{ env.CMAKE_VERSION }}
           load: true
           tags: virtmcu-builder:${{ matrix.arch }}
-          cache-from: type=gha,scope=builder-${{ matrix.arch }}
+          cache-from: type=gha,scope=virtmcu-${{ matrix.arch }}
 
       - name: Extract binaries from container
         run: |
           docker create --name extract virtmcu-builder:${{ matrix.arch }}
           docker cp extract:/opt/virtmcu ./virtmcu-dist
           docker rm extract
-          
+
           # Include basic project info
           cp LICENSE ./virtmcu-dist/
           cat <<EOF > ./virtmcu-dist/README-BINARY.md
           # virtmcu QEMU Binaries
-          
+
           This package contains a patched version of QEMU with support for:
           - arm-generic-fdt machine
           - Zenoh-based deterministic networking and clock synchronization
           - Dynamic QOM plugin loading
-          
+
           ## System Requirements
           This is a dynamically linked QEMU build for Ubuntu 24.04 (or compatible glibc-based Linux).
           You will need the following runtime dependencies installed on your host:
           \`\`\`bash
           sudo apt-get update && sudo apt-get install -y libglib2.0-0 libpixman-1-0 libslirp0
           \`\`\`
-          
+
           ## Architecture
           - Host: ${{ matrix.arch }}
           - Target Guest Support: ARM, RISC-V (32/64)
-          
+
           ## Usage
           The binaries in \`bin/\` have their RPATH set to find libraries in \`../lib/\`.
           No LD_LIBRARY_PATH should be required.
-          
+
           Example:
           ./bin/qemu-system-arm -M arm-generic-fdt -dtb your_board.dtb
           EOF
@@ -86,7 +86,7 @@ jobs:
       - name: Portable Smoke Test
         run: |
           # Test the extracted binary in a clean ubuntu container
-          docker run --rm -v $(pwd)/virtmcu-dist:/virtmcu-dist ubuntu:24.04 bash -c "
+          docker run --rm -v "$(pwd)/virtmcu-dist":/virtmcu-dist ubuntu:24.04 bash -c "
             apt-get update && apt-get install -y --no-install-recommends libglib2.0-0 libpixman-1-0 libslirp0
             /virtmcu-dist/bin/qemu-system-arm --version
             /virtmcu-dist/bin/qemu-system-riscv64 --version
@@ -98,7 +98,7 @@ jobs:
         run: |
           TARBALL_NAME="virtmcu-qemu-${{ env.QEMU_VERSION }}-${{ matrix.arch }}.tar.gz"
           tar -czf "$TARBALL_NAME" -C ./virtmcu-dist .
-          echo "TARBALL_PATH=$TARBALL_NAME" >> $GITHUB_ENV
+          echo "TARBALL_PATH=$TARBALL_NAME" >> "$GITHUB_ENV"
 
       - name: Build virtmcu-tools
         if: matrix.arch == 'amd64'
@@ -111,7 +111,7 @@ jobs:
           cp dist/* ../../
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: virtmcu-release-assets-${{ matrix.arch }}
           path: |
@@ -127,10 +127,10 @@ jobs:
       contents: write
     if: startsWith(github.ref, 'refs/tags/')
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           path: artifacts
           pattern: virtmcu-release-assets-*

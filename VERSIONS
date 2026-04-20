@@ -22,6 +22,7 @@ BINDGEN_VERSION=0.72.1
 
 # FlatBuffers serialization library
 FLATBUFFERS_VERSION=25.12.19
+FLATCC_VERSION=0.6.1
 
 # Python requirements are managed in requirements.txt (must match ZENOH_VERSION)
 
@@ -38,3 +39,7 @@ PYTHON_VERSION=3.13
 # Pinned independently of Debian apt to guarantee cross-compiler reproducibility.
 # Binary fidelity (ADR-006) requires the toolchain to be bit-for-bit stable.
 ARM_TOOLCHAIN_VERSION=13.3.rel1
+
+# CI Tooling
+HADOLINT_VERSION=2.14.0
+ACTIONLINT_VERSION=1.7.12

@@ -1,5 +1,6 @@
 import logging
 import os
+from pathlib import Path
 
 from mcp.server import Server
 from mcp.types import (
@@ -7,6 +8,7 @@ from mcp.types import (
     TextContent,
     Tool,
 )
+from pydantic import AnyUrl
 
 from tools.mcp_server.node_manager import NodeManager
 
@@ -15,9 +17,10 @@ logger = logging.getLogger(__name__)
 
 def create_mcp_server() -> Server:
     server = Server("virtmcu-mcp")
-    server.node_manager = NodeManager()
+    node_manager = NodeManager()
+    server.node_manager = node_manager  # type: ignore
 
-    @server.list_tools()
+    @server.list_tools()  # type: ignore[untyped-decorator]
     async def handle_list_tools() -> list[Tool]:
         """List available tools for the AI agent."""
         return [
@@ -178,53 +181,53 @@ def create_mcp_server() -> Server:
             ),
         ]
 
-    @server.call_tool()
+    @server.call_tool()  # type: ignore[untyped-decorator]
     async def handle_call_tool(name: str, arguments: dict) -> list[TextContent]:
         """Handle execution of tools."""
         try:
             if name == "provision_board":
                 node_id = arguments["node_id"]
-                await server.node_manager.provision_board(
+                await node_manager.provision_board(
                     node_id, arguments["board_config"], arguments.get("config_type", "yaml")
                 )
                 return [TextContent(type="text", text=f"Board provisioned for node {node_id}.")]
 
-            elif name == "flash_firmware":
+            if name == "flash_firmware":
                 node_id = arguments["node_id"]
-                server.node_manager.flash_firmware(node_id, arguments["firmware_path"])
+                node_manager.flash_firmware(node_id, arguments["firmware_path"])
                 return [
                     TextContent(
                         type="text", text=f"Firmware '{arguments['firmware_path']}' associated with node {node_id}."
                     )
                 ]
 
-            elif name == "start_node":
+            if name == "start_node":
                 node_id = arguments["node_id"]
-                await server.node_manager.start_node(node_id)
+                await node_manager.start_node(node_id)
                 return [TextContent(type="text", text=f"Node {node_id} started.")]
 
-            elif name == "stop_node":
+            if name == "stop_node":
                 node_id = arguments["node_id"]
-                await server.node_manager.stop_node(node_id)
+                await node_manager.stop_node(node_id)
                 return [TextContent(type="text", text=f"Node {node_id} stopped.")]
 
-            elif name == "pause_node":
-                node = server.node_manager.get_node(arguments["node_id"])
+            if name == "pause_node":
+                node = node_manager.get_node(arguments["node_id"])
                 await node.qmp_bridge.pause_emulation()
                 return [TextContent(type="text", text=f"Node {arguments['node_id']} paused.")]
 
-            elif name == "resume_node":
-                node = server.node_manager.get_node(arguments["node_id"])
+            if name == "resume_node":
+                node = node_manager.get_node(arguments["node_id"])
                 await node.qmp_bridge.start_emulation()
                 return [TextContent(type="text", text=f"Node {arguments['node_id']} resumed.")]
 
-            elif name == "read_cpu_state":
-                node = server.node_manager.get_node(arguments["node_id"])
+            if name == "read_cpu_state":
+                node = node_manager.get_node(arguments["node_id"])
                 hmp_res = await node.qmp_bridge.execute("human-monitor-command", {"command-line": "info registers"})
                 return [TextContent(type="text", text=hmp_res)]
 
-            elif name == "read_memory":
-                node = server.node_manager.get_node(arguments["node_id"])
+            if name == "read_memory":
+                node = node_manager.get_node(arguments["node_id"])
                 addr = arguments["address"]
                 size = arguments["size"]
                 if size > 1024 * 1024:  # 1MB limit for safety
@@ -237,15 +240,15 @@ def create_mcp_server() -> Server:
                 os.close(fd)
                 try:
                     await node.qmp_bridge.execute("pmemsave", {"val": addr, "size": size, "filename": tmp_path})
-                    with open(tmp_path, "rb") as f:
+                    with Path(tmp_path).open("rb") as f:
                         data = f.read()
                     hex_data = data.hex()
                     return [TextContent(type="text", text=f"Memory at {hex(addr)} ({size} bytes):\n{hex_data}")]
                 finally:
-                    os.remove(tmp_path)
+                    Path(tmp_path).unlink()
 
             elif name == "disassemble":
-                node = server.node_manager.get_node(arguments["node_id"])
+                node = node_manager.get_node(arguments["node_id"])
                 addr = arguments["address"]
                 if addr == -1:
                     addr = await node.qmp_bridge.get_pc()
@@ -266,7 +269,7 @@ def create_mcp_server() -> Server:
                 ]
 
             elif name == "send_uart_input":
-                node = server.node_manager.get_node(arguments["node_id"])
+                node = node_manager.get_node(arguments["node_id"])
                 await node.qmp_bridge.write_to_uart(arguments["data"])
                 return [
                     TextContent(
@@ -277,14 +280,14 @@ def create_mcp_server() -> Server:
             elif name == "set_network_latency":
                 import json
 
-                session = server.node_manager.get_zenoh_session()
+                session = node_manager.get_zenoh_session()
                 topic = "sim/network/control"
-                data = {
+                latency_data = {
                     "node_a": arguments["node_a"],
                     "node_b": arguments["node_b"],
                     "latency_ns": arguments["latency_ns"],
                 }
-                session.put(topic, json.dumps(data).encode("utf-8"))
+                session.put(topic, json.dumps(latency_data).encode("utf-8"))
                 return [
                     TextContent(
                         type="text",
@@ -296,14 +299,14 @@ def create_mcp_server() -> Server:
                 raise ValueError(f"Unknown tool: {name}")
         except (Exception, BaseException) as e:
             logger.error(f"Error executing tool {name}: {e}")
-            return [TextContent(type="text", text=f"Error: {str(e)}")]
+            return [TextContent(type="text", text=f"Error: {e!s}")]
 
-    @server.list_resources()
+    @server.list_resources()  # type: ignore[untyped-decorator]
     async def handle_list_resources() -> list[Resource]:
         """List available resources for the AI agent."""
         resources = [
             Resource(
-                uri="virtmcu://simulation/status",
+                uri=AnyUrl("virtmcu://simulation/status"),
                 name="Simulation Status",
                 mimeType="application/json",
                 description="A global view of all running nodes and their status.",
@@ -311,11 +314,11 @@ def create_mcp_server() -> Server:
         ]
 
         # Add UART console for each running node
-        for node_id, node in server.node_manager.nodes.items():
+        for node_id, node in node_manager.nodes.items():
             if node.process and node.process.returncode is None:
                 resources.append(
                     Resource(
-                        uri=f"virtmcu://nodes/{node_id}/console",
+                        uri=AnyUrl(f"virtmcu://nodes/{node_id}/console"),
                         name=f"Console - {node_id}",
                         mimeType="text/plain",
                         description=f"Real-time UART output stream for node {node_id}.",
@@ -324,12 +327,14 @@ def create_mcp_server() -> Server:
 
         return resources
 
-    @server.read_resource()
+    @server.read_resource()  # type: ignore[untyped-decorator]
     async def handle_read_resource(uri: str) -> str:
         uri = str(uri)
         if uri == "virtmcu://simulation/status":
-            status = {"status": "running", "nodes": []}
-            for node_id, node in server.node_manager.nodes.items():
+            from typing import Any
+
+            status: dict[str, Any] = {"status": "running", "nodes": []}
+            for node_id, node in node_manager.nodes.items():
                 node_status = "running" if (node.process and node.process.returncode is None) else "stopped"
                 status["nodes"].append({"id": node_id, "status": node_status})
             import json
@@ -339,8 +344,8 @@ def create_mcp_server() -> Server:
         if uri.startswith("virtmcu://nodes/") and uri.endswith("/console"):
             parts = uri.split("/")
             node_id = parts[3]
-            if node_id in server.node_manager.nodes:
-                node = server.node_manager.nodes[node_id]
+            if node_id in node_manager.nodes:
+                node = node_manager.nodes[node_id]
                 return node.qmp_bridge.uart_buffer
             raise ValueError(f"Node {node_id} not found")
 

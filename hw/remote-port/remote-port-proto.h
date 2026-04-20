@@ -30,7 +30,7 @@
 
 /*
  * Remote-Port (RP) is an inter-simulator protocol. It assumes a reliable
- * point to point communcation with the remote simulation environment.
+ * point to point communication with the remote simulation environment.
  *
  * Setup
  * In the SETUP phase a mandatory HELLO packet is exchanged with optional
@@ -131,7 +131,7 @@ enum {
      * This turned out to be a bad idea. To fix it without breaking backwards
      * compatibility, we add the WIRE Posted updates capability.
      *
-     * If the peer supportes this, it will respect the RP_PKT_FLAGS_posted
+     * If the peer supports this, it will respect the RP_PKT_FLAGS_posted
      * flag. If the peer doesn't support this capability, senders need to
      * be aware that the peer will not respond to wire updates regardless
      * of the posted header-flag.
@@ -323,7 +323,7 @@ void rp_encode_hdr(struct rp_pkt_hdr *hdr,
                    uint32_t flags);
 
 /*
- * caps is a an array of supported capabilities by the implementor.
+ * caps is a an array of supported capabilities by the implementer.
  * caps_out is the encoded (network byte order) version of the
  * same array. It should be sent to the peer after the hello packet.
  */

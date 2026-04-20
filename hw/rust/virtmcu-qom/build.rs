@@ -1,7 +1,12 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+//! Build script for virtmcu-qom.
+
 use std::env;
 use std::path::PathBuf;
 
 fn main() {
+    println!("cargo::rustc-check-cfg=cfg(qemu_headers_present)");
+    println!("cargo::rustc-check-cfg=cfg(qemu_headers_missing)");
     let qemu_dir =
         std::env::var("QEMU_SRC_DIR").unwrap_or_else(|_| "../../../third_party/qemu".to_string());
     let build_dir = std::env::var("QEMU_BUILD_DIR")
@@ -10,43 +15,54 @@ fn main() {
     // Check if QEMU headers are present
     let osdep_h = std::path::Path::new(&qemu_dir).join("include/qemu/osdep.h");
     if !osdep_h.exists() {
-        println!(
-            "cargo:warning=QEMU headers not found at {:?}. Skipping binding and FFI generation.",
-            osdep_h
-        );
+        if std::env::var("VIRTMUC_SKIP_QEMU_HEADERS_WARNING").is_err() {
+            println!(
+                "cargo:warning=QEMU headers not found at {}. Skipping binding and FFI generation.",
+                osdep_h.display()
+            );
+        }
         // Create an empty bindings file so the build doesn't fail
         let out_path = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());
-        std::fs::write(out_path.join("bindings.rs"), "").expect("Couldn't write dummy bindings!");
-        // Create an empty wrapper too
+        std::fs::write(out_path.join("bindings.rs"), "").unwrap_or_else(|_| std::process::abort()); // "Couldn't write dummy bindings!");
+                                                                                                    // Create an empty wrapper too
         let wrapper_path = out_path.join("qemu_bindings.rs");
         std::fs::write(&wrapper_path, "pub mod qemu {}").unwrap();
+        println!("cargo:rustc-cfg=qemu_headers_missing");
         return;
     }
 
+    println!("cargo:rustc-cfg=qemu_headers_present");
     println!("cargo:rerun-if-changed=wrapper.h");
     println!("cargo:rerun-if-changed=src/ffi.c");
     println!("cargo:rerun-if-changed=src/ffi.h");
 
-    cc::Build::new()
+    let mut builder = cc::Build::new();
+    builder
         .file("src/ffi.c")
-        .include(format!("{}/include", qemu_dir))
+        .include(format!("{qemu_dir}/include"))
         .include(&build_dir)
-        .include(format!("{}/qapi", build_dir))
-        .include(format!("{}/linux-headers", qemu_dir))
+        .include(format!("{build_dir}/qapi"))
+        .include(format!("{qemu_dir}/linux-headers"))
         .include("/usr/include/glib-2.0")
         .include("/usr/lib/aarch64-linux-gnu/glib-2.0/include")
         .include("/usr/lib/x86_64-linux-gnu/glib-2.0/include")
         .warnings(false)
         .flag_if_supported("-Wno-unused-parameter")
-        .flag_if_supported("-Wno-sign-compare")
-        .compile("virtmcu_ffi");
+        .flag_if_supported("-Wno-sign-compare");
+
+    if std::env::var("VIRTMCU_USE_ASAN").unwrap_or_default() == "1" {
+        builder.flag("-fsanitize=address");
+        builder.flag("-fsanitize=undefined");
+    }
+
+    builder.compile("virtmcu_ffi");
 
     let bindings = bindgen::Builder::default()
         .header("wrapper.h")
-        .clang_arg(format!("-I{}/include", qemu_dir))
-        .clang_arg(format!("-I{}", build_dir))
-        .clang_arg(format!("-I{}/qapi", build_dir))
-        .clang_arg(format!("-I{}/linux-headers", qemu_dir))
+        .clang_arg(format!("-I{qemu_dir}/include"))
+        .clang_arg(format!("-I{build_dir}"))
+        .clang_arg(format!("-I{build_dir}/qapi"))
+        .clang_arg(format!("-I{qemu_dir}/linux-headers"))
         .clang_arg("-I/usr/include/glib-2.0")
         .clang_arg("-I/usr/lib/aarch64-linux-gnu/glib-2.0/include")
         .clang_arg("-I/usr/lib/x86_64-linux-gnu/glib-2.0/include") // support x86_64 too just in case
@@ -65,20 +81,22 @@ fn main() {
         .allowlist_type("CPUState")
         .allowlist_type("QemuMutex")
         .allowlist_type("QemuCond")
+        .allowlist_type("CanBusClientState")
+        .allowlist_type("CanBusClientInfo")
+        .allowlist_type("qemu_can_frame")
+        .allowlist_type("CanHostState")
         .layout_tests(true)
         .generate()
-        .expect("Unable to generate bindings");
+        .unwrap_or_else(|_| std::process::abort()); // "Unable to generate bindings");
 
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     let bindings_file = out_path.join("bindings.rs");
-    bindings
-        .write_to_file(&bindings_file)
-        .expect("Couldn't write bindings!");
+    bindings.write_to_file(&bindings_file).unwrap_or_else(|_| std::process::abort()); // "Couldn't write bindings!");
 
     // Create a self-contained wrapper module to isolate lints
     let wrapper_path = out_path.join("qemu_bindings.rs");
     let wrapper_content = format!(
-        "#[allow(dead_code, non_snake_case, non_camel_case_types, non_upper_case_globals, clippy::all, unnecessary_transmutes)]\n\
+        "#[allow(dead_code, non_snake_case, non_camel_case_types, non_upper_case_globals, clippy::all, clippy::pedantic, unnecessary_transmutes)]\n\
          pub mod qemu {{\n\
              include!({:?});\n\
          }}",

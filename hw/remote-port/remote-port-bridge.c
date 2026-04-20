@@ -51,7 +51,7 @@ struct RemotePortBridgeState {
     uint32_t next_id;
 };
 
-static bool writen(int fd, const void *buf, size_t len)
+static bool written(int fd, const void *buf, size_t len)
 {
     const char *p = buf;
     while (len > 0) {
@@ -179,11 +179,11 @@ static void send_req_and_wait(RemotePortBridgeState *s, struct rp_pkt *req, size
     s->has_resp = false;
     bql_unlock();
 
-    bool ok = writen(s->sock_fd, req, req_len);
+    bool ok = written(s->sock_fd, req, req_len);
     if (ok && req_data) {
         uint32_t payload_len = be32toh(req->hdr.len);
         uint32_t to_write = payload_len - (req_len - sizeof(struct rp_pkt_hdr));
-        ok = writen(s->sock_fd, req_data, to_write);
+        ok = written(s->sock_fd, req_data, to_write);
     }
 
     if (ok) {
@@ -294,7 +294,7 @@ static void bridge_realize(DeviceState *dev, Error **errp)
     size_t len = rp_encode_hello_caps(0, 0, &hello_req.hello, RP_VERSION_MAJOR, RP_VERSION_MINOR,
                                        NULL, NULL, 0);
     
-    if (!writen(s->sock_fd, &hello_req, len)) {
+    if (!written(s->sock_fd, &hello_req, len)) {
         error_setg(errp, "Failed to send Remote port HELLO");
         close(s->sock_fd);
         s->sock_fd = -1;

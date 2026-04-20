@@ -14,9 +14,9 @@ These tests cover two layers:
 
 from __future__ import annotations
 
-import os
 import struct
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -171,11 +171,11 @@ def test_clock_ready_unpacking():
 # ---------------------------------------------------------------------------
 
 _QEMU_BIN = "/workspace/third_party/qemu/build-virtmcu/install/bin/qemu-system-arm"
-_STRESS_SCRIPT = os.path.join(os.path.dirname(__file__), "..", "test", "phase8", "uart_stress_test.sh")
+_STRESS_SCRIPT = Path(__file__).parent / ".." / "test" / "phase8" / "uart_stress_test.sh"
 
 
 @pytest.mark.skipif(
-    not os.path.exists(_QEMU_BIN),
+    not Path(_QEMU_BIN).exists(),
     reason="QEMU binary not found — skipping integration test",
 )
 def test_uart_stress_integration():
@@ -187,7 +187,7 @@ def test_uart_stress_integration():
     that the same test works both locally and in CI.
     """
     result = subprocess.run(
-        ["bash", os.path.abspath(_STRESS_SCRIPT)],
+        ["bash", Path(_STRESS_SCRIPT).resolve()],
         capture_output=False,
         timeout=120,
     )

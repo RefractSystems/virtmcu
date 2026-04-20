@@ -1,7 +1,7 @@
-import os
 import struct
 import sys
 import time
+from pathlib import Path
 
 import zenoh
 
@@ -11,7 +11,8 @@ RF_HEADER_SIZE = 14
 
 session = None
 ping_responded = False
-script_dir = os.path.dirname(os.path.abspath(__file__))
+script_dir = Path(Path(__file__).resolve().parent)
+
 
 def on_sample(sample):
     global session, ping_responded
@@ -49,19 +50,21 @@ def on_sample(sample):
     print(f"[{resp2_vtime}] Sending MATCHED response...")
     session.put("sim/rf/802154/0/rx", msg2)
 
+
 def on_tx_sample(sample):
     payload = sample.payload.to_bytes()
     if len(payload) < RF_HEADER_SIZE:
         return
 
     header = struct.unpack(RF_HEADER_FORMAT, payload[:RF_HEADER_SIZE])
-    vtime, size, rssi, lqi = header
+    vtime, size, _rssi, _lqi = header
     data = payload[RF_HEADER_SIZE:]
 
     if size == 3 and (data[0] & 0x07) == 0x02:
         print(f"[{vtime}] RECEIVED AUTO-ACK for seq {data[2]}")
-        with open(os.path.join(script_dir, "ack_received.tmp"), "w") as f:
+        with (Path(script_dir) / "ack_received.tmp").open("w") as f:
             f.write("OK")
+
 
 def main():
     global session
@@ -82,6 +85,7 @@ def main():
             time.sleep(1)
     except KeyboardInterrupt:
         pass
+
 
 if __name__ == "__main__":
     main()

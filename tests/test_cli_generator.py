@@ -1,7 +1,7 @@
-import os
 import sys
+from pathlib import Path
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "../../"))
 from tools.repl2qemu.cli_generator import generate_cli
 from tools.repl2qemu.parser import ReplDevice, ReplPlatform
 

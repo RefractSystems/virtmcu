@@ -1,10 +1,10 @@
-import os
 import sys
+from pathlib import Path
 
 import zenoh
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-TOOLS_DIR = os.path.join(os.path.dirname(os.path.dirname(SCRIPT_DIR)), "tools")
+SCRIPT_DIR = Path(Path(__file__).resolve().parent)
+TOOLS_DIR = Path(Path(Path(SCRIPT_DIR).parent.parent)) / "tools"
 if TOOLS_DIR not in sys.path:
     sys.path.append(TOOLS_DIR)
 

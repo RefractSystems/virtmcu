@@ -1,8 +1,8 @@
-import os
 import struct
 import subprocess
 import threading
 import time
+from pathlib import Path
 
 import pytest
 import zenoh
@@ -19,7 +19,6 @@ import zenoh
 TOPIC_BASE = "sim/chardev"  # must match zenoh-chardev subscription
 NODE_ID = "0"
 PORT = 7449
-
 # 10k packets at 1 µs spacing → timers fire rapidly, stressing BQL from timer callbacks
 FLOOD_COUNT = 10_000
 FLOOD_VTIME_START_NS = 10_000_000  # 10 ms — avoids spending instructions before first byte
@@ -27,35 +26,21 @@ FLOOD_VTIME_STEP_NS = 1_000  # 1 µs between bytes
 
 
 @pytest.fixture
-def zenoh_router():
-    router_path = os.path.join(os.getcwd(), "tests/zenoh_router_persistent.py")
-    proc = subprocess.Popen(
-        ["python3", router_path, f"tcp/127.0.0.1:{PORT}"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    time.sleep(2)
-    yield f"tcp/127.0.0.1:{PORT}"
-    proc.terminate()
-    proc.wait()
-
-
-@pytest.fixture
 def qemu_instance(zenoh_router):
-    dtb = os.path.join(os.getcwd(), "test/phase1/minimal.dtb")
-    kernel = os.path.join(os.getcwd(), "test/phase8/echo.elf")
+    dtb = Path(Path.cwd()) / "test/phase1/minimal.dtb"
+    kernel = Path(Path.cwd()) / "test/phase8/echo.elf"
     qmp_sock = "/tmp/qmp_bql_stress.sock"
-    if os.path.exists(qmp_sock):
-        os.remove(qmp_sock)
+    if Path(qmp_sock).exists():
+        Path(qmp_sock).unlink()
 
     # Standalone icount: QEMU runs freely without clock-sync blocking the main
     # loop, so QMP remains responsive throughout the flood.
     cmd = [
         "./scripts/run.sh",
         "--dtb",
-        dtb,
+        str(dtb),
         "-kernel",
-        kernel,
+        str(kernel),
         "-icount",
         "shift=6,align=off,sleep=off",
         "-chardev",

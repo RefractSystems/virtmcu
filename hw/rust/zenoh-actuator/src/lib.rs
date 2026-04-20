@@ -63,9 +63,9 @@ unsafe extern "C" fn zenoh_actuator_read(opaque: *mut c_void, addr: u64, size: c
     let s = &mut *(opaque as *mut ZenohActuatorQEMU);
 
     if addr == REG_ACTUATOR_ID {
-        s.actuator_id as u64
+        u64::from(s.actuator_id)
     } else if addr == REG_DATA_SIZE {
-        s.data_size as u64
+        u64::from(s.data_size)
     } else if addr >= REG_DATA_START && addr < REG_DATA_START + 8 * 8 {
         let idx = ((addr - REG_DATA_START) / 8) as usize;
         let offset = ((addr - REG_DATA_START) % 8) as usize;
@@ -74,7 +74,7 @@ unsafe extern "C" fn zenoh_actuator_read(opaque: *mut c_void, addr: u64, size: c
             unsafe {
                 ptr::copy_nonoverlapping(
                     (s.data.as_ptr().add(idx) as *const u8).add(offset),
-                    &mut ret as *mut u64 as *mut u8,
+                    &raw mut ret as *mut u8,
                     size as usize,
                 );
             }
@@ -106,7 +106,7 @@ unsafe extern "C" fn zenoh_actuator_write(opaque: *mut c_void, addr: u64, val: u
         if offset + (size as usize) <= 8 {
             unsafe {
                 ptr::copy_nonoverlapping(
-                    &val as *const u64 as *const u8,
+                    &raw const val as *const u8,
                     (s.data.as_mut_ptr().add(idx) as *mut u8).add(offset),
                     size as usize,
                 );
@@ -141,37 +141,26 @@ unsafe extern "C" fn zenoh_actuator_realize(dev: *mut c_void, errp: *mut *mut c_
     let s = &mut *(dev as *mut ZenohActuatorQEMU);
 
     memory_region_init_io(
-        &mut s.mmio,
+        &raw mut s.mmio,
         dev as *mut Object,
-        &ZENOH_ACTUATOR_OPS,
+        &raw const ZENOH_ACTUATOR_OPS,
         dev,
         c"zenoh-actuator".as_ptr(),
         0x100,
     );
-    sysbus_init_mmio(dev as *mut SysBusDevice, &mut s.mmio);
+    sysbus_init_mmio(dev as *mut SysBusDevice, &raw mut s.mmio);
 
-    let router_ptr = if s.router.is_null() {
-        ptr::null()
-    } else {
-        s.router as *const c_char
-    };
+    let router_ptr = if s.router.is_null() { ptr::null() } else { s.router.cast_const() };
 
     let prefix = if s.topic_prefix.is_null() {
         "firmware/control".to_string()
     } else {
-        unsafe {
-            CStr::from_ptr(s.topic_prefix)
-                .to_string_lossy()
-                .into_owned()
-        }
+        unsafe { CStr::from_ptr(s.topic_prefix).to_string_lossy().into_owned() }
     };
 
     s.rust_state = zenoh_actuator_init_internal(s.node_id, router_ptr, prefix);
     if s.rust_state.is_null() {
-        virtmcu_qom::error_setg!(
-            errp as *mut *mut Error,
-            c"zenoh-actuator: failed to initialize Rust backend".as_ptr()
-        );
+        virtmcu_qom::error_setg!(errp, "zenoh-actuator: failed to initialize Rust backend");
         return;
     }
 }
@@ -241,11 +230,7 @@ fn zenoh_actuator_init_internal(
         }
     };
 
-    Box::into_raw(Box::new(ZenohActuatorState {
-        session,
-        node_id,
-        topic_prefix,
-    }))
+    Box::into_raw(Box::new(ZenohActuatorState { session, node_id, topic_prefix }))
 }
 
 fn zenoh_actuator_publish(
@@ -265,10 +250,21 @@ fn zenoh_actuator_publish(
         payload.extend_from_slice(&data[i].to_le_bytes());
     }
 
-    virtmcu_qom::vlog!(
-        "[zenoh-actuator] Publishing to {} (size={})\n",
-        topic,
-        payload.len()
-    );
+    virtmcu_qom::vlog!("[zenoh-actuator] Publishing to {} (size={})\n", topic, payload.len());
     let _ = state.session.put(topic, payload).wait();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_zenoh_actuator_qemu_layout() {
+        // QOM layout validation
+        assert_eq!(
+            core::mem::offset_of!(ZenohActuatorQEMU, parent_obj),
+            0,
+            "SysBusDevice must be the first field"
+        );
+    }
 }

@@ -8,7 +8,7 @@ def test_on_sample_cpu_state(capsys):
     mock_sample = MagicMock()
     mock_sample.payload.to_bytes.return_value = b"dummy_payload"
 
-    with patch("tools.telemetry_listener.TraceEvent") as MockTraceEvent:
+    with patch("tools.telemetry_listener.TraceEvent") as MockTraceEvent:  # noqa: N806
         mock_ev = MagicMock()
         MockTraceEvent.GetRootAs.return_value = mock_ev
         mock_ev.DeviceName.return_value = None
@@ -28,7 +28,7 @@ def test_on_sample_irq(capsys):
     mock_sample = MagicMock()
     mock_sample.payload.to_bytes.return_value = b"dummy_payload"
 
-    with patch("tools.telemetry_listener.TraceEvent") as MockTraceEvent:
+    with patch("tools.telemetry_listener.TraceEvent") as MockTraceEvent:  # noqa: N806
         mock_ev = MagicMock()
         MockTraceEvent.GetRootAs.return_value = mock_ev
         mock_ev.DeviceName.return_value = None
@@ -48,7 +48,7 @@ def test_on_sample_peripheral(capsys):
     mock_sample = MagicMock()
     mock_sample.payload.to_bytes.return_value = b"dummy_payload"
 
-    with patch("tools.telemetry_listener.TraceEvent") as MockTraceEvent:
+    with patch("tools.telemetry_listener.TraceEvent") as MockTraceEvent:  # noqa: N806
         mock_ev = MagicMock()
         MockTraceEvent.GetRootAs.return_value = mock_ev
         mock_ev.DeviceName.return_value = None
@@ -68,7 +68,7 @@ def test_on_sample_unknown(capsys):
     mock_sample = MagicMock()
     mock_sample.payload.to_bytes.return_value = b"dummy_payload"
 
-    with patch("tools.telemetry_listener.TraceEvent") as MockTraceEvent:
+    with patch("tools.telemetry_listener.TraceEvent") as MockTraceEvent:  # noqa: N806
         mock_ev = MagicMock()
         MockTraceEvent.GetRootAs.return_value = mock_ev
         mock_ev.DeviceName.return_value = None
@@ -88,7 +88,7 @@ def test_on_sample_exception(capsys):
     mock_sample = MagicMock()
     mock_sample.payload.to_bytes.return_value = b"\x01\x02"
 
-    with patch("tools.telemetry_listener.TraceEvent") as MockTraceEvent:
+    with patch("tools.telemetry_listener.TraceEvent") as MockTraceEvent:  # noqa: N806
         MockTraceEvent.GetRootAs.side_effect = Exception("Parse error")
 
         on_sample(mock_sample)
@@ -100,7 +100,7 @@ def test_on_sample_exception(capsys):
 @patch("sys.argv", ["telemetry_listener.py", "1"])
 @patch("tools.telemetry_listener.zenoh")
 @patch("time.sleep")
-def test_main_block(mock_sleep, mock_zenoh, capsys):
+def test_main_block(mock_sleep, mock_zenoh, capsys):  # noqa: ARG001
     # Make time.sleep raise KeyboardInterrupt to exit the infinite loop
     mock_sleep.side_effect = KeyboardInterrupt
 

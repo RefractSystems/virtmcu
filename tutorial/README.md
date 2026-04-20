@@ -48,3 +48,15 @@ Standard hardware emulators like QEMU are incredibly fast but relatively rigid: 
 
 *   **[Lesson 11.3: Remote Port Co-Simulation (Path B)](./lesson11.3-remote-port/README.md)**
     Learn how to perform full TLM-2.0 co-simulation via the industry-standard AMD/Xilinx Remote Port protocol to support Verilated FPGA fabrics and high-bandwidth SoC subsystems.
+
+*   **[Lesson 13: AI-Augmented Debugging](./lesson13-ai-debugging/README.md)**
+    Learn how to use AI agents (like Claude and Gemini) to analyze simulation failures, interpret QEMU stack traces, and automatically generate unit tests for virtual hardware.
+
+*   **[Lesson 15: Setup, Distribution, and Pre-built Binaries](./lesson15-distribution/README.md)**
+    Learn how to package the virtmcu ecosystem into portable Docker images and distributable binary releases for use in automated CI pipelines.
+
+*   **[Lesson 16: Profiling and Benchmarking virtmcu](./lesson16-performance/README.md)**
+    Learn how to measure the performance of your deterministic simulations, identify bottlenecks in Zenoh clock synchronization, and ensure timing determinism under host jitter.
+
+*   **[Lesson 17: Securing the Digital Twin Boundary](./lesson17-security-boundary/README.md)**
+    Explore the security implications of hardware-in-the-loop simulation, including memory isolation, input validation for MMIO bridges, and protecting the Zenoh federation from spoofing.

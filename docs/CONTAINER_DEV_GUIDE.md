@@ -12,14 +12,19 @@ debian:trixie-slim
         │
      [base]          vscode user (UID 1000), zsh + oh-my-zsh, GitHub CLI, uv, common tools
         │
-  [toolchain]        build deps, ARM GNU Toolchain binary, Python pin (uv), CMake, FlatBuffers
+  [toolchain]        build deps, ARM GNU Toolchain binary, Python pin (uv), CMake (lean)
         │
-        ├── [devenv]    Rust + Node.js + Claude Code + Gemini CLI  ← devcontainer target
-        ├── [builder]   QEMU compile + zenoh-c build               ← CI / smoke tests
-        └── [runtime]   lean: QEMU binaries + Python tooling       ← production image
+        ├── [devenv-base] Rust + Node.js + AI CLIs                 ← CI lint/unit tests
+        │     │
+        │     └── [devenv]  + pre-built QEMU binaries              ← devcontainer target
+        │
+        └── [simulation-toolchain]  + flatcc, zenoh-c              ← Intermediate sim layer
+              │
+              ├── [builder]   QEMU compile + plugins               ← CI / smoke tests
+              └── [runtime]   lean: QEMU binaries + Python tooling ← production image
 ```
 
-`builder` and `runtime` are not required for local development. `devenv` is the daily driver.
+`builder` and `runtime` are not required for local development. `devenv` is the daily driver for VS Code, while `devenv-base` is used for ultra-fast local and CI lints without requiring a QEMU build. The `simulation-toolchain` decouples heavy C-level simulation dependencies (like `flatcc`) from the fast linting track.
 
 ---
 
@@ -36,7 +41,7 @@ make docker-all
 IMAGE_TAG=my-branch make docker-dev
 
 # Open an interactive shell in the devenv image
-docker run --rm -it --user vscode virtmcu-devenv:dev zsh
+docker run --rm -it --user vscode ghcr.io/refractsystems/virtmcu/devenv:dev-amd64 zsh
 ```
 
 All versions are read from the `VERSIONS` file automatically — no manual `--build-arg` needed.
@@ -65,7 +70,7 @@ These build the target stage plus all its dependencies (Docker cache applies). N
 
 ```bash
 # base
-docker run --rm virtmcu-base:dev bash -c "
+docker run --rm ghcr.io/refractsystems/virtmcu/base:dev-amd64 bash -c "
     id vscode
     test -d /home/vscode/.oh-my-zsh && echo 'oh-my-zsh: ok'
     sudo -n true && echo 'sudo: ok'
@@ -74,29 +79,34 @@ docker run --rm virtmcu-base:dev bash -c "
 "
 
 # toolchain
-docker run --rm virtmcu-toolchain:dev bash -c "
+docker run --rm ghcr.io/refractsystems/virtmcu/toolchain:dev-amd64 bash -c "
     arm-none-eabi-gcc --version | head -1
     uv run --python 3.13 python --version
     cmake --version | head -1
     flatc --version
 "
 
-# devenv (as vscode — claude lives in ~/.local/bin)
-docker run --rm --user vscode virtmcu-devenv:dev bash -c "
+# devenv-base (as vscode)
+docker run --rm --user vscode ghcr.io/refractsystems/virtmcu/devenv-base:dev-amd64 bash -c "
     node --version && npm --version
-    claude --version
+    gemini --version || true # gemini cli might be aliased, but test npm global install
     cargo --version && rustc --version
     arm-none-eabi-gcc --version | head -1
 "
 
+# devenv (adds QEMU)
+docker run --rm --user vscode ghcr.io/refractsystems/virtmcu/devenv:dev-amd64 bash -c "
+    qemu-system-arm --version
+"
+
 # builder
-docker run --rm virtmcu-builder:dev bash -c "
+docker run --rm ghcr.io/refractsystems/virtmcu/builder:dev-amd64 bash -c "
     qemu-system-arm --version
     ls \${QEMU_MODULE_DIR}/*.so | head -5
 "
 
 # runtime
-docker run --rm virtmcu-runtime:dev bash -c "
+docker run --rm ghcr.io/refractsystems/virtmcu/runtime:dev-amd64 bash -c "
     qemu-system-arm --version
     python3 -c 'import zenoh; print(zenoh.__version__)'
     python3 -c 'import flatbuffers; print(flatbuffers.__version__)'
@@ -131,11 +141,26 @@ docker run --rm -it <last-good-sha> bash
 | `arm-none-eabi-gcc: not found` after build | ARM toolchain download URL changed | Check current URL format at [ARM releases](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads), update `ARM_TOOLCHAIN_VERSION` in `VERSIONS` |
 | `flatc: error while loading shared libraries: libstdc++.so.6` | `libstdc++6` missing from image | It's explicitly listed in the `toolchain` apt block; verify it wasn't removed |
 | oh-my-zsh install hangs | GitHub connectivity issue at build time | `docker build` with `--network=host`; or add `--no-cache` to skip the cached layer |
-| `claude --version` fails in smoke test | Claude Code PATH not set | Must run as `--user vscode` or confirm `ENV PATH="/home/vscode/.local/bin:${PATH}"` is in Dockerfile |
+| `gemini --version` fails in smoke test | Gemini CLI not installed globally | Verify `npm install -g @google/gemini-cli@latest` is in Dockerfile |
 | `NodeSource setup_N.x` fails | NodeSource added codename support for the current Debian release after this was written | The Dockerfile uses a direct binary download from nodejs.org — no codename dependency. If failing, check `NODE_VERSION` in `VERSIONS` and verify the nodejs.org dist URL |
 | `uv python install` fails | Network issue fetching python-build-standalone | Retry; uv downloads OS-agnostic glibc binaries, not distro-specific packages |
 
 ---
+
+
+## Git Authentication inside Devcontainer
+
+If `git push` or `git pull` fail inside the Devcontainer with errors like `connect ENOENT /tmp/vscode-git-...` or `No anonymous write access`, it means the VS Code credential forwarding has failed or been overridden.
+
+To fix this and use your forwarded GitHub CLI credentials:
+
+```bash
+# Re-initialize the GitHub CLI as the git credential helper
+gh auth setup-git
+```
+
+*Note: Ensure you have already authenticated `gh` on your host machine or run `gh auth login` inside the container if needed.*
+
 
 ## Inspecting a running devcontainer
 
@@ -151,7 +176,7 @@ echo $0                     # zsh
 arm-none-eabi-gcc --version | head -1
 uv run python --version
 cmake --version | head -1
-claude --version
+gemini --version
 node --version
 
 # Confirm the workspace virtual environment is active
@@ -190,6 +215,7 @@ make docker-dev
 | `pyproject.toml` | `eclipse-zenoh`, `flatbuffers` |
 | `requirements.txt` | `eclipse-zenoh`, `flatbuffers` |
 | `tools/zenoh_coordinator/Cargo.toml` | `zenoh` crate version |
+| `hw/rust/Cargo.toml` | `zenoh`, `flatbuffers` |
 | `worlds/pendulum.yml` | inline `uv pip install eclipse-zenoh==` |
 
 `check-versions` is a read-only enforcer run in the CI lint tier. It fails if any of the above are out of sync with `VERSIONS`, with a message pointing to `make sync-versions`.

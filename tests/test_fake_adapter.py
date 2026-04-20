@@ -1,8 +1,8 @@
-import os
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.insert(0, str(Path(__file__).resolve().parent / ".."))
 from tools.fake_adapter import recvall, start_server
 from tools.vproto import MMIO_REQ_WRITE, VIRTMCU_PROTO_MAGIC, VIRTMCU_PROTO_VERSION, MmioReq, VirtmcuHandshake
 
@@ -51,8 +51,8 @@ def test_start_server_hs_mismatch(mock_socket_cls, capsys):
 
 
 @patch("tools.fake_adapter.socket.socket")
-@patch("os.unlink")
-@patch("os.path.exists")
+@patch("pathlib.Path.unlink")
+@patch("pathlib.Path.exists")
 def test_start_server_success(mock_exists, mock_unlink, mock_socket_cls, capsys):
     mock_exists.return_value = True
 
@@ -74,8 +74,8 @@ def test_start_server_success(mock_exists, mock_unlink, mock_socket_cls, capsys)
 
     start_server("/tmp/fake_mmio.sock")
 
-    mock_exists.assert_called_with("/tmp/fake_mmio.sock")
-    mock_unlink.assert_called_with("/tmp/fake_mmio.sock")
+    mock_exists.assert_called_with()
+    mock_unlink.assert_called_with()
     mock_server.bind.assert_called_with("/tmp/fake_mmio.sock")
     mock_server.listen.assert_called_with(1)
 

@@ -19,18 +19,18 @@ TEST_BYTE = b"X"
 TEST_BYTE_VAL = ord("X")
 
 # Start at 10 ms virtual time so QEMU doesn't burn instructions before the
-# first byte (50k × 800 ns = 40 ms, all delivered by ~50 ms vtime).
+# first byte (50k × 800 ns = 40 ms, all delivered by ~50 ms vtime).  # noqa: RUF003
 START_VTIME_NS = 10_000_000
 
-CHUNK_SIZE = 1_000        # bytes per Zenoh publication burst
-CHUNK_SLEEP_S = 0.01      # throttle between bursts (avoids overwhelming router)
-QUANTUM_NS = 10_000_000   # 10 ms per clock-advance quantum
+CHUNK_SIZE = 1_000  # bytes per Zenoh publication burst
+CHUNK_SLEEP_S = 0.01  # throttle between bursts (avoids overwhelming router)
+QUANTUM_NS = 10_000_000  # 10 ms per clock-advance quantum
 
-# Virtual time ceiling: 50k bytes × 10 µs retry per byte (1-byte PL011 FIFO)
+# Virtual time ceiling: 50k bytes × 10 µs retry per byte (1-byte PL011 FIFO)  # noqa: RUF003
 # = 500 ms + 40 ms byte timestamps + 10 ms start offset + margin = 1 s
 CLOCK_TOTAL_NS = 1_000_000_000
 
-RX_TIMEOUT_S = 60         # wall-clock timeout waiting for all echoes
+RX_TIMEOUT_S = 60  # wall-clock timeout waiting for all echoes
 
 
 def _pack_clock_advance(delta_ns: int, mujoco_time_ns: int = 0) -> bytes:
@@ -136,9 +136,6 @@ if received_all_event.wait(timeout=RX_TIMEOUT_S):
 else:
     with _lock:
         final_count = _x_count
-    print(
-        f"[UART Stress] FAIL: timeout after {RX_TIMEOUT_S} s"
-        f" — received {final_count}/{TOTAL_BYTES} echo bytes"
-    )
+    print(f"[UART Stress] FAIL: timeout after {RX_TIMEOUT_S} s — received {final_count}/{TOTAL_BYTES} echo bytes")
     session.close()
     sys.exit(1)

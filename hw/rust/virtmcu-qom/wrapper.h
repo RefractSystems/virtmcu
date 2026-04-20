@@ -8,6 +8,8 @@
 #include "hw/core/sysbus.h"
 #include "chardev/char.h"
 #include "net/net.h"
+#include "net/can_emu.h"
+#include "net/can_host.h"
 #include "system/memory.h"
 #include "hw/core/cpu.h"
 #include "qemu/thread.h"

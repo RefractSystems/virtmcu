@@ -1,9 +1,7 @@
-from typing import List, Tuple
-
 from .parser import ReplPlatform
 
 
-def generate_cli(platform: ReplPlatform, dtb_path: str) -> Tuple[List[str], str]:
+def generate_cli(platform: ReplPlatform, dtb_path: str) -> tuple[list[str], str]:
     """
     Generates the QEMU CLI arguments based on the parsed platform.
     Returns (args_list, arch_string).

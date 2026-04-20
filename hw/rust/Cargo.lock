@@ -1376,6 +1376,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mmio-socket-bridge"
+version = "0.1.0"
+dependencies = [
+ "virtmcu-api",
+ "virtmcu-qom",
+]
+
+[[package]]
 name = "nanorand"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2235,6 +2243,18 @@ name = "ryu"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
+
+[[package]]
+name = "s32k144-lpuart"
+version = "0.1.0"
+dependencies = [
+ "crossbeam-channel",
+ "flatbuffers",
+ "virtmcu-api",
+ "virtmcu-qom",
+ "virtmcu-zenoh",
+ "zenoh",
+]
 
 [[package]]
 name = "same-file"
@@ -3182,7 +3202,13 @@ dependencies = [
 name = "virtmcu-test-devices"
 version = "0.1.0"
 dependencies = [
- "virtmcu-api",
+ "virtmcu-qom",
+]
+
+[[package]]
+name = "virtmcu-wifi"
+version = "0.1.0"
+dependencies = [
  "virtmcu-qom",
 ]
 
@@ -3190,7 +3216,6 @@ dependencies = [
 name = "virtmcu-zenoh"
 version = "0.1.0"
 dependencies = [
- "libc",
  "virtmcu-qom",
  "zenoh",
 ]
@@ -3883,8 +3908,6 @@ dependencies = [
 name = "zenoh-actuator"
 version = "0.1.0"
 dependencies = [
- "byteorder",
- "libc",
  "virtmcu-qom",
  "virtmcu-zenoh",
  "zenoh",
@@ -3900,10 +3923,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "zenoh-canfd"
+version = "0.1.0"
+dependencies = [
+ "crossbeam-channel",
+ "flatbuffers",
+ "virtmcu-api",
+ "virtmcu-qom",
+ "virtmcu-zenoh",
+ "zenoh",
+]
+
+[[package]]
 name = "zenoh-chardev"
 version = "0.1.0"
 dependencies = [
- "byteorder",
  "crossbeam-channel",
  "libc",
  "virtmcu-api",
@@ -3993,6 +4027,18 @@ dependencies = [
  "rand_chacha 0.3.1",
  "sha3",
  "zenoh-result",
+]
+
+[[package]]
+name = "zenoh-flexray"
+version = "0.1.0"
+dependencies = [
+ "crossbeam-channel",
+ "flatbuffers",
+ "virtmcu-api",
+ "virtmcu-qom",
+ "virtmcu-zenoh",
+ "zenoh",
 ]
 
 [[package]]
@@ -4228,9 +4274,7 @@ dependencies = [
 name = "zenoh-netdev"
 version = "0.1.0"
 dependencies = [
- "byteorder",
  "crossbeam-channel",
- "libc",
  "virtmcu-api",
  "virtmcu-qom",
  "virtmcu-zenoh",
@@ -4293,6 +4337,16 @@ dependencies = [
  "tracing",
  "zenoh-macros",
  "zenoh-result",
+]
+
+[[package]]
+name = "zenoh-spi"
+version = "0.1.0"
+dependencies = [
+ "virtmcu-api",
+ "virtmcu-qom",
+ "virtmcu-zenoh",
+ "zenoh",
 ]
 
 [[package]]
@@ -4376,8 +4430,6 @@ dependencies = [
 name = "zenoh-ui"
 version = "0.1.0"
 dependencies = [
- "crossbeam-channel",
- "libc",
  "virtmcu-qom",
  "virtmcu-zenoh",
  "zenoh",

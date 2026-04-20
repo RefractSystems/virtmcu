@@ -1,7 +1,9 @@
 import asyncio
+import contextlib
 import logging
 import re
-from typing import Any, Dict, Optional
+from pathlib import Path
+from typing import Any
 
 from qemu.qmp import QMPClient
 from qemu.qmp.protocol import Runstate
@@ -19,16 +21,16 @@ class QmpBridge:
 
     def __init__(self):
         self.qmp = QMPClient("virtmcu-tester")
-        self.uart_reader: Optional[asyncio.StreamReader] = None
-        self.uart_writer: Optional[asyncio.StreamWriter] = None
+        self.uart_reader: asyncio.StreamReader | None = None
+        self.uart_writer: asyncio.StreamWriter | None = None
         self.uart_buffer = ""
-        self._read_task: Optional[asyncio.Task] = None
+        self._read_task: asyncio.Task | None = None
 
     @property
     def is_connected(self) -> bool:
         return self.qmp.runstate == Runstate.RUNNING
 
-    async def connect(self, qmp_socket_path: str, uart_socket_path: Optional[str] = None):
+    async def connect(self, qmp_socket_path: str, uart_socket_path: str | None = None):
         """
         Connects to the QMP socket and optionally the UART socket.
         """
@@ -60,7 +62,7 @@ class QmpBridge:
         except Exception as e:
             logger.error(f"UART read error: {e}")
 
-    async def execute(self, cmd: str, args: Optional[Dict[str, Any]] = None) -> Any:
+    async def execute(self, cmd: str, args: dict[str, Any] | None = None) -> Any:
         """
         Executes a QMP command and returns the result.
         """
@@ -87,18 +89,22 @@ class QmpBridge:
                 if current_vtime > start_vtime:
                     # Virtual time is advancing — use it as the authoritative clock.
                     if (current_vtime - start_vtime) / 1e9 > timeout:
-                        raise asyncio.TimeoutError()
+                        raise TimeoutError()
                 else:
                     # Standalone mode or VM paused at startup — fall back to wall clock.
                     if asyncio.get_running_loop().time() - start_wall > timeout:
-                        raise asyncio.TimeoutError()
+                        raise TimeoutError()
                 await asyncio.sleep(0.1)
 
         async def get_event():
-            async with self.qmp.listen() as listener:
+            from qemu.qmp.events import EventListener
+
+            listener = EventListener()
+            with self.qmp.listen(listener):
                 async for event in listener:
                     if event["event"] == event_name:
                         return event
+            return None
 
         event_task = asyncio.create_task(get_event())
         timeout_task = asyncio.create_task(poll_timeout())
@@ -110,10 +116,8 @@ class QmpBridge:
 
         for task in pending:
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await task
-            except asyncio.CancelledError:
-                pass
 
         # Check tasks by identity so the outcome is deterministic even if both
         # tasks land in `done` simultaneously (asyncio sets have no order).
@@ -155,6 +159,23 @@ class QmpBridge:
 
             await asyncio.sleep(0.1)
 
+    async def wait_for_virtual_time(self, target_vtime_ns: int, timeout_wall: float = 30.0):
+        """
+        Waits until the virtual clock reaches the target nanoseconds.
+        """
+        loop = asyncio.get_running_loop()
+        start_wall = loop.time()
+
+        while True:
+            current_vtime = await self.get_virtual_time_ns()
+            if current_vtime >= target_vtime_ns:
+                return current_vtime
+
+            if loop.time() - start_wall > timeout_wall:
+                raise TimeoutError(f"Timed out waiting for vtime {target_vtime_ns} ns (current: {current_vtime} ns)")
+
+            await asyncio.sleep(0.1)
+
     def clear_uart_buffer(self):
         """
         Clears the accumulated UART buffer.
@@ -182,6 +203,24 @@ class QmpBridge:
         Pauses the emulation.
         """
         await self.execute("stop")
+
+    async def read_memory(self, addr: int, size: int) -> bytes:
+        """
+        Reads a block of physical memory from the guest.
+        """
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(prefix="qemu-memsave-", delete=False) as tf:
+            tmpname = tf.name
+
+        try:
+            # QEMU memsave: saves guest physical memory to a file
+            await self.execute("memsave", {"val": addr, "size": size, "filename": tmpname})
+            with Path(tmpname).open("rb") as f:
+                return f.read()
+        finally:
+            if Path(tmpname).exists():
+                Path(tmpname).unlink()
 
     async def get_pc(self) -> int:
         """
@@ -230,18 +269,14 @@ class QmpBridge:
         """
         if self._read_task:
             self._read_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._read_task
-            except asyncio.CancelledError:
-                pass
             self._read_task = None
 
         if self.uart_writer:
             self.uart_writer.close()
-            try:
+            with contextlib.suppress(asyncio.TimeoutError, Exception):
                 await asyncio.wait_for(self.uart_writer.wait_closed(), timeout=2.0)
-            except (asyncio.TimeoutError, Exception):
-                pass
             self.uart_writer = None
             self.uart_reader = None
 

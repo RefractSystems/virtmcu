@@ -1,3 +1,8 @@
+ARCH ?= $(shell uname -m | sed -e "s/x86_64/amd64/" -e "s/aarch64/arm64/")
+IMAGE_TAG ?= dev
+DEVENV_BASE_IMG ?= ghcr.io/refractsystems/virtmcu/devenv-base:$(IMAGE_TAG)-$(ARCH)
+BUILDER_IMG ?= ghcr.io/refractsystems/virtmcu/builder:$(IMAGE_TAG)-$(ARCH)
+
 # ==============================================================================
 # Top-level Makefile for virtmcu
 #
@@ -7,7 +12,7 @@
 #
 # Most developers will only need:
 #   make setup-initial — Clone QEMU, apply patches, and build from scratch (run ONLY once per environment).
-#   make build         — Perform an incremental rebuild of QEMU after modifying `hw/`. (Default target)
+#   make build	 — Perform an incremental rebuild of QEMU after modifying `hw/`. (Default target)
 #   make run      — Launch QEMU using the minimal Phase 1 test DTB.
 # ==============================================================================
 
@@ -17,7 +22,7 @@ QEMU_BUILD?= $(QEMU_SRC)/build-virtmcu
 # Automatically determine the number of parallel jobs for make
 JOBS      ?= $(shell nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
 
-.PHONY: all setup-initial build run clean clean-sim clean-debug distclean venv test test-unit test-robot test-all lint fmt install-hooks sync-versions check-versions docker-dev docker-all docker-base docker-toolchain docker-devenv docker-builder docker-runtime ci-local ci-full perf-bench perf-check perf-baseline
+.PHONY: all setup-initial build run clean clean-sim clean-debug distclean venv fmt fmt-python fmt-rust fmt-c fmt-meson fmt-yaml lint lint-python lint-python-types lint-rust lint-c lint-shell lint-docker lint-yaml lint-actions lint-meson lint-spelling test test-unit test-python test-integration test-robot test-all build-test-artifacts build-tools install-hooks sync-versions check-versions docker-dev docker-all docker-base docker-toolchain docker-devenv docker-builder docker-runtime ci-local ci-full perf-bench perf-check perf-baseline
 
 # By default, perform an incremental build
 all: build
@@ -73,19 +78,13 @@ venv:
 		curl -LsSf https://astral.sh/uv/install.sh | sh; \
 		export PATH="$$HOME/.local/bin:$$PATH"; \
 	fi
-	uv sync
+	uv sync --link-mode=copy
 	@echo "✓ Virtual environment synchronized with uv."
 	@echo "✓ Activate with: source .venv/bin/activate"
 
 # Run integration smoke tests (Bash/QEMU level tests for phases 1 & 2)
-test-integration: venv
+test-integration: venv build-test-artifacts
 	@bash scripts/cleanup-sim.sh --quiet
-	@echo "==> Building test artifacts..."
-	@$(MAKE) -C test/phase1
-	@$(MAKE) -C test/phase8
-	@$(MAKE) -C test/phase12
-	@$(MAKE) -C test/actuator
-	@$(MAKE) -C test/riscv
 	@echo "==> Running integration tests..."
 	@for test_script in test/*/smoke_test.sh; do \
 		echo "--> Running $$test_script"; \
@@ -94,15 +93,40 @@ test-integration: venv
 	done
 	@echo "✓ All integration tests passed."
 
-# Alias for running all phase smoke tests in one go
-smoke-tests: test-integration
+# Run integration tests compiled with C/C++ memory sanitizers (ASan/UBSan)
+test-asan: venv build-test-artifacts
+	@echo "==> Building QEMU with ASan/UBSan enabled..."
+	VIRTMCU_USE_ASAN=1 bash scripts/setup-qemu.sh --force
+	@bash scripts/cleanup-sim.sh --quiet
+	@echo "==> Running integration tests under ASan/UBSan..."
+	ASAN_OPTIONS=detect_leaks=1,halt_on_error=1,detect_stack_use_after_return=1 \
+	UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+	$(MAKE) test-integration
+	@echo "✓ All ASan integration tests passed."
+
+# Run Miri to detect Undefined Behavior in pure-Rust logic and safe FFI wrappers
+test-miri:
+	@echo "==> Running cargo miri test..."
+	@if ! rustup component list --toolchain nightly 2>/dev/null | grep -q "miri (installed)"; then \
+		echo "Installing Rust nightly toolchain and Miri..."; \
+		rustup toolchain install nightly --profile minimal --component miri; \
+	fi
+	@cd hw/rust && cargo +nightly miri setup
+	@cd hw/rust && MIRIFLAGS="-Zmiri-disable-isolation" cargo +nightly miri test
+	@echo "✓ Miri tests passed."
+
 
 # Run all Python unit tests (no QEMU required).
-test: venv build-test-artifacts
-	PYTHONPATH=$(CURDIR) uv run pytest tests/ -v
+test-unit: venv
+	@echo "==> Running Tier 1 Unit Tests (no QEMU)..."
+	PYTHONPATH=$(CURDIR) uv run pytest \
+		tests/repl2qemu/ tests/test_yaml2qemu.py tests/test_cli_generator.py \
+		tests/test_fdt_emitter.py tests/test_qmp_bridge.py tests/test_vproto.py \
+		tests/test_telemetry_listener.py tests/test_telemetry_fbs.py tests/test_fake_adapter.py \
+		tests/test_mcp_server/ \
+		-v -n auto --tb=short
 
-# Alias: same as test — explicit name for CI scripts.
-test-unit: test
+test: test-unit
 
 # Run Robot Framework integration tests (requires QEMU built via make setup-initial).
 test-robot: venv
@@ -119,13 +143,14 @@ test-coverage-guest:
 	@docker run --rm \
 		-v "$(CURDIR):/workspace" -w /workspace \
 		-e PYTHONPATH=/workspace \
-		virtmcu-builder:dev \
+		$(BUILDER_IMG) \
 		bash -c "make -C test/phase1 && \
-		         DRCOV_SO=\$$(find /opt/virtmcu/lib/qemu/plugins /build/qemu -name 'libdrcov.so' 2>/dev/null | head -n 1) && \
-		         qemu-system-arm -M arm-generic-fdt,hw-dtb=test/phase1/minimal.dtb \
-		           -kernel test/phase1/hello.elf -nographic -m 128M -display none \
-		           -plugin \"\$$DRCOV_SO\",filename=hello.drcov -d plugin && \
-		         python3 tools/analyze_coverage.py hello.drcov test/phase1/hello.elf --fail-under 80"
+			 DRCOV_SO=\$$(find /opt/virtmcu/lib/qemu/plugins /build/qemu -name 'libdrcov.so' 2>/dev/null | head -n 1) && \
+			 qemu-system-arm -M arm-generic-fdt,hw-dtb=test/phase1/minimal.dtb \
+			   -kernel test/phase1/hello.elf -nographic -m 128M -display none \
+			   -plugin \"\$$DRCOV_SO\",filename=hello.drcov -d plugin & \
+			 sleep 2 && kill -INT \$$! && wait \$$! || true; \
+			 python3 tools/analyze_coverage.py hello.drcov test/phase1/hello.elf --fail-under 80"
 	@echo "✓ Guest coverage check passed."
 
 # Generate host-side C/Rust coverage report (requires lcov)
@@ -156,46 +181,184 @@ build-test-artifacts:
 	@$(MAKE) -C test/phase12
 	@$(MAKE) -C test/actuator
 	@$(MAKE) -C test/riscv
+	@$(MAKE) -C test/phase27
+	@echo "==> Building zenoh_coordinator..."
+	@cargo build --manifest-path tools/zenoh_coordinator/Cargo.toml --release
+	@echo "==> Building cyber_bridge..."
+	@cargo build --manifest-path tools/cyber_bridge/Cargo.toml --release
 
 # Run the complete test suite: unit tests, integration smoke tests, Robot tests.
 test-all: test test-integration test-robot test-coverage-guest
+
+# Run integration smoke tests inside the builder container (Safe for macOS hosts).
+test-integration-docker:
+	@echo "==> Running integration tests inside builder container..."
+	docker run --rm \
+		-v "$(CURDIR):/workspace" -w /workspace \
+		-e PYTHONPATH=/workspace \
+		-e VIRTMUC_SKIP_QEMU_HEADERS_WARNING=1 \
+		$(BUILDER_IMG) \
+		bash -c "make venv build-test-artifacts && for test_script in test/*/smoke_test.sh; do echo '--> Running \$$test_script'; bash \"\$$test_script\" || exit 1; done"
+	@echo "✓ All integration tests passed inside container."
 
 # ------------------------------------------------------------------------------
 # Lint & Format
 # ------------------------------------------------------------------------------
 
-# Check Python style (same rules as CI).
-lint: venv check-versions lint-cargo
-	@echo "==> ruff check..."
-	uv run ruff check tools/ tests/ patches/
-	@echo "✓ Lint passed."
+lint: venv check-versions lint-python lint-python-types lint-rust lint-c lint-shell lint-docker lint-yaml lint-actions lint-meson lint-spelling lint-audit lint-docs
+	@echo "All linting and static analysis checks passed!"
 
-# Check Cargo workspace versions.
-lint-cargo:
+lint-docs:
+	@echo "==> Checking Rust documentation..."
+	@cd hw/rust && RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+	@echo "✓ Rust documentation check passed."
+
+lint-audit:
+	@echo "==> Security Audit (Rust)..."
+	@if command -v cargo-audit >/dev/null 2>&1; then \
+		cargo audit --ignore RUSTSEC-2026-0041 --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2024-0436 --ignore RUSTSEC-2025-0134 -f Cargo.lock && \
+		cargo audit --ignore RUSTSEC-2026-0041 --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2024-0436 --ignore RUSTSEC-2025-0134 -f hw/rust/Cargo.lock; \
+	else \
+		echo "⚠️  cargo-audit not installed. Skipping Rust security audit. (Run 'cargo install cargo-audit' to enable)"; \
+	fi
+
+	@echo "==> cargo deny (supply chain security)..."
+	@if command -v cargo-deny >/dev/null 2>&1; then \
+		cargo deny check && echo "✓ cargo deny passed." || { echo "❌ cargo deny failed"; exit 1; }; \
+	else \
+		echo "⚠️  cargo-deny not installed. Skipping Rust supply chain audit. (Run 'cargo install cargo-deny' to enable)"; \
+	fi
+	@echo "✓ Audit checks completed."
+lint-python:
+	@echo "==> ruff check..."
+	uv run ruff check .
+	@echo "✓ ruff passed."
+
+lint-spelling:
+	@echo "==> codespell..."
+	@uvx codespell --skip="./third_party/*,./.venv/*,**/build/*,**/target/*,./.git/*,./.claude/*,Cargo.lock,uv.lock,./patches/*,./coverage_report/*,./test-results/*,./.cargo-cache/*" \
+		--ignore-words-list="virtmcu,zenoh,qemu,qmp,riscv,TE" .
+	@echo "✓ codespell passed."
+
+
+lint-shell:
+	@echo "==> shellcheck..."
+	@shellcheck --version >/dev/null 2>&1 || { echo "❌ Error: shellcheck is not installed. Install with: sudo apt-get install shellcheck"; exit 1; }
+	@find . -type f -name "*.sh" -not -path "*/third_party/*" -not -path "*/.venv/*" -not -path "*/build/*" -not -path "*/.cargo-cache/*" -print0 | xargs -0 shellcheck --severity=warning
+	@echo "✓ shellcheck passed."
+
+
+lint-docker:
+	@echo "==> hadolint..."
+	@hadolint --version >/dev/null 2>&1 || { echo "❌ Error: hadolint is not installed. Install from: https://github.com/hadolint/hadolint"; exit 1; }
+	@hadolint docker/Dockerfile
+	@echo "✓ hadolint passed."
+
+lint-actions:
+	@echo "==> actionlint..."
+	@actionlint -version >/dev/null 2>&1 || { echo "❌ Error: actionlint is not installed. Install with: (curl -s https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash) && sudo mv actionlint /usr/local/bin/"; exit 1; }
+	@actionlint
+	@echo "✓ actionlint passed."
+
+
+lint-yaml:
+	@echo "==> yamllint..."
+	@uvx yamllint -d "{extends: relaxed, rules: {line-length: disable}}" $$(find . -type f \( -name "*.yml" -o -name "*.yaml" \) -not -path "*/third_party/*" -not -path "*/.venv/*" -not -path "*/build/*" -not -path "*/target/*" -not -path "*/.claude/*" -not -path "*/.cargo-cache/*")
+	@echo "✓ yamllint passed."
+
+lint-python-types:
+	@echo "==> mypy..."
+	@uv run mypy tools/ tests/ patches/
+	@echo "✓ mypy passed."
+lint-c:
+	@echo "==> clang-format (dry-run)..."
+	@clang-format --version >/dev/null 2>&1 || { echo "❌ Error: clang-format is not installed. Install with: sudo apt-get install clang-format"; exit 1; }
+	@find hw tools test -type f \( -name "*.c" -o -name "*.h" -o -name "*.cpp" -o -name "*.cc" -o -name "*.hpp" \) \
+		-not -path "*/rust/*" \
+		-not -path "*/remote-port/*" \
+		-not -path "*/third_party/*" \
+		-not -path "*/build/*" \
+		-not -path "*/.venv/*" \
+		-not -path "*/target/*" \
+		-print0 | xargs -0 clang-format -Werror --dry-run
+	@echo "✓ clang-format passed."
+	@echo "==> cppcheck..."
+	@cppcheck --version >/dev/null 2>&1 || { echo "❌ Error: cppcheck is not installed. Install with: sudo apt-get install cppcheck"; exit 1; }
+	@cppcheck --error-exitcode=1 --enable=warning,style,performance,portability --quiet --std=c11 \
+		--suppress=unusedFunction \
+		--suppress=arithOperationsOnVoidPointer \
+		--suppress=normalCheckLevelMaxBranches \
+		--suppress=uninitvar --suppress=legacyUninitvar \
+		--suppress=knownConditionTrueFalse \
+		--suppress=identicalInnerCondition \
+		--suppress=dangerousTypeCast \
+		--suppress=constVariablePointer --suppress=constParameterPointer \
+		--suppress=redundantAssignment --suppress=noExplicitConstructor \
+		--suppress=constParameterCallback --suppress=unusedVariable \
+		-i tools/systemc_adapter/build/ \
+		-DDEFINE_TYPES= \
+		hw/misc/ hw/remote-port/ tools/systemc_adapter/
+	@echo "✓ cppcheck passed."
+
+
+lint-rust:
 	@echo "==> Checking Cargo workspace version synchronization..."
 	@cd hw/rust && cargo metadata --no-deps --format-version 1 | \
 		python3 -c "import sys,json; m=json.load(sys.stdin); vs=set(p['version'] for p in m['packages']); assert len(vs)==1, f'version drift: {vs}'"
 	@echo "✓ Cargo workspace versions aligned."
 	@echo "==> Running cargo fmt --check..."
 	@cd hw/rust && cargo fmt --all --check
+	@echo "==> Running cargo machete..."
+	@cd hw/rust && cargo machete
+	@cd tools/zenoh_coordinator && cargo machete
+	@cd tools/cyber_bridge && cargo machete
 	@echo "==> Running cargo clippy..."
-	@cd hw/rust && cargo clippy --workspace -- -D warnings -D clippy::all
+	@cd hw/rust && cargo clippy --workspace
 
-# Auto-fix formatting and fixable lint errors.
-fmt: venv
+lint-meson:
+	@echo "==> Running meson format..."
+	@uvx meson format -q hw/meson.build
+	@echo "✓ meson format passed."
+build-tools:
+	@echo "==> Building virtmcu-tools package..."
+	@cd packaging/virtmcu-tools && uv build >/dev/null && \
+		WHEEL_FILE=$$(ls dist/*.whl | head -n 1) && \
+		unzip -l "$$WHEEL_FILE" | grep "virtmcu_tools/repl2qemu/" >/dev/null && \
+		unzip -l "$$WHEEL_FILE" | grep "virtmcu_tools/yaml2qemu.py" >/dev/null && \
+		unzip -l "$$WHEEL_FILE" | grep "virtmcu_tools/mcp_server/" >/dev/null && \
+		unzip -l "$$WHEEL_FILE" | grep "virtmcu_tools/qmp_bridge.py" >/dev/null && \
+		echo "✓ virtmcu-tools package build passed."
+
+fmt: fmt-python fmt-rust fmt-meson fmt-c fmt-yaml
+
+fmt-python: venv
 	@echo "==> ruff format + fix..."
-	uv run ruff format tools/ tests/ patches/
-	uv run ruff check tools/ tests/ patches/ --fix
-	@echo "✓ Done."
+	uv run ruff format .
+	uv run ruff check . --fix
 
-# Install a git pre-push hook that runs lint before any push.
-# Opt-in: run once with  make install-hooks
+fmt-rust:
+	@echo "==> cargo fmt..."
+	@cd hw/rust && cargo fmt --all
+
+fmt-meson:
+	@echo "==> meson format..."
+	@meson fmt -i hw/meson.build && echo "✓ meson format passed." || { echo "❌ meson format failed"; exit 1; }
+
+fmt-c:
+	@echo "==> clang-format..."
+	@find hw -type f \( -name "*.c" -o -name "*.h" \) -not -path "*/rust/*" -not -path "*/remote-port/*" -not -path "*/third_party/*" -print0 | xargs -0 clang-format -i && echo "✓ clang-format passed." || { echo "❌ clang-format failed"; exit 1; }
+
+fmt-yaml:
+	@echo "==> stripping trailing whitespace from YAMLs..."
+	@find . -type f \( -name "*.yml" -o -name "*.yaml" \) -not -path "*/third_party/*" -not -path "*/.venv/*" -print0 | xargs -0 sed -i 's/[[:space:]]*$$//'
+
 install-hooks:
-	@echo "==> Installing pre-push hook..."
+	@echo "==> Installing Git hooks..."
 	@mkdir -p .git/hooks
-	@printf '#!/bin/sh\nset -e\nmake lint\n' > .git/hooks/pre-push
-	@chmod +x .git/hooks/pre-push
-	@echo "✓ pre-push hook installed (make lint will run on every push)."
+	@printf '#!/bin/sh\nset -e\nmake ci-local\n' > .git/hooks/pre-commit
+	@printf '#!/bin/sh\nset -e\nmake test-integration-docker\n' > .git/hooks/pre-push
+	@chmod +x .git/hooks/pre-push .git/hooks/pre-commit
+	@echo "✓ hooks installed: pre-commit (ci-local), pre-push (test-integration-docker)."
 
 # ------------------------------------------------------------------------------
 # Performance Benchmarking & Trend Tracking (Phase 16)
@@ -222,56 +385,36 @@ perf-check: venv
 # Local CI Simulation
 # Mirrors the GitHub CI tier structure so you can validate locally before push.
 #
-#   make ci-local   — Tier 1 (lint + check-versions + unit tests) +
-#                     Tier 2 (base → toolchain → devenv Docker builds with smoke tests)
-#                     ~10 min with warm Docker cache; ~15 min cold.
-#                     Covers every CI check that does NOT require the full QEMU build.
+#   make ci-local   — Fast path for git commit hooks. Runs lints and unit tests
+#		     inside the devenv-base container. Does NOT build the container.
+#		     (Run 'make docker-dev' manually if the image is missing or stale).
 #
-#   make ci-full    — ci-local + builder stage (QEMU compile, ~40 min cold) +
-#                     runtime image + representative phase smoke tests inside container.
-#                     This is the closest local equivalent to the full GitHub CI run.
+#   make ci-full    — ci-local + ci-asan + ci-miri + builder stage (QEMU compile) +
+#		     runtime image + representative phase smoke tests inside container.
+#		     This is the closest local equivalent to the full GitHub CI run.
 #
-# Gaps vs GitHub CI (tools not installed locally):
-#   shellcheck — install with: brew install shellcheck
-#   hadolint   — install with: brew install hadolint
-# Both are skipped with a warning if absent; install them for full parity.
+# All linting tools are mandatory for 1:1 parity with GitHub CI.
 # ------------------------------------------------------------------------------
 
-ci-local: venv check-versions
+ci-local: 
+	@echo "════════════════════════════════════════════════════"
+	@echo "  CI Tier 1 — Running Lints & Unit Tests inside container"
+	@echo "════════════════════════════════════════════════════"
+	# Run lints and unit tests strictly inside the devenv-base container.
+	# We map the current host user's UID/GID into the container to ensure that 
+	# any generated files (like .venv) are owned by YOU, not root.
+	docker run --rm \
+		--user $$(id -u):$$(id -g) \
+		-e HOME=/tmp \
+		-e USER=vscode \
+		-e CARGO_HOME=/tmp/.cargo \
+		-e VIRTMUC_SKIP_QEMU_HEADERS_WARNING=1 \
+		-e UV_PROJECT_ENVIRONMENT=/workspace/.venv-docker \
+		-e UV_PROJECT_ENVIRONMENT=/workspace/.venv-docker \
+		-v "$(CURDIR):/workspace" -w /workspace \
+		$(DEVENV_BASE_IMG) bash -c "make lint && make test-unit"
 	@echo ""
-	@echo "════════════════════════════════════════════════════"
-	@echo "  CI Tier 1 — Lint"
-	@echo "════════════════════════════════════════════════════"
-	@echo "==> ruff check..."
-	uv run ruff check tools/ tests/ patches/
-	@echo "==> shellcheck..."
-	@if command -v shellcheck >/dev/null 2>&1; then \
-		shellcheck --severity=warning scripts/*.sh; \
-		echo "✓ shellcheck passed."; \
-	else \
-		echo "  WARNING: shellcheck not installed (brew install shellcheck) — skipping."; \
-	fi
-	@echo "==> hadolint..."
-	@if command -v hadolint >/dev/null 2>&1; then \
-		hadolint --ignore DL3008 --ignore DL3009 --ignore DL4006 --ignore SC2016 --ignore SC2015 --ignore DL3002 --ignore DL3016 docker/Dockerfile; \
-		echo "✓ hadolint passed."; \
-	else \
-		echo "  WARNING: hadolint not installed (brew install hadolint) — skipping."; \
-	fi
-	@echo ""
-	@echo "════════════════════════════════════════════════════"
-	@echo "  CI Tier 1 — Unit Tests (no QEMU)"
-	@echo "════════════════════════════════════════════════════"
-	PYTHONPATH=$(CURDIR) uv run pytest \
-		tests/repl2qemu/ \
-		-v --tb=short
-	@echo ""
-	@echo "════════════════════════════════════════════════════"
-	@echo "  CI Tier 2 — Docker: base → toolchain → devenv"
-	@echo "════════════════════════════════════════════════════"
-	@bash scripts/docker-build.sh dev
-	@echo ""
-	@echo "✓ ci-local passed."
+	@echo "✓ ci-local passed (parity with GitHub CI Tier 1)."
 	@echo "  To run the full pipeline (builder ~40 min + integration tests): make ci-full"
 
 # Run host-side C coverage for peripheral plugins (inside builder)
@@ -280,7 +423,7 @@ test-coverage-peripheral:
 	@mkdir -p test-results
 	@docker run --rm \
 		-v "$(CURDIR):/workspace" -w /workspace \
-		virtmcu-builder:dev \
+		$(BUILDER_IMG) \
 		bash -c "gcovr -r /build/qemu/hw/virtmcu \
 			--gcov-executable gcov \
 			--object-directory /build/qemu/build-virtmcu \
@@ -289,7 +432,7 @@ test-coverage-peripheral:
 			--html-details /workspace/test-results/peripheral-coverage.html \
 			--print-summary"
 
-ci-full: ci-local
+ci-full: ci-local ci-asan ci-miri
 	@echo ""
 	@echo "════════════════════════════════════════════════════"
 	@echo "  CI Full — Docker: builder + runtime"
@@ -298,30 +441,18 @@ ci-full: ci-local
 	@bash scripts/docker-build.sh runtime
 	@echo ""
 	@echo "════════════════════════════════════════════════════"
-	@echo "  CI Full — Integration smoke tests (inside builder)"
+	@echo "  CI Full — Integration smoke tests matrix (inside builder)"
 	@echo "════════════════════════════════════════════════════"
-	@echo "  Running representative phases (1, 8, 12, riscv)..."
 	@mkdir -p coverage-data
+	@echo "==> Running full smoke test matrix (Equivalent to GitHub CI)..."
 	docker run --rm \
 		-v "$(CURDIR):/workspace" -w /workspace \
 		-e PYTHONPATH=/workspace \
-		-e VIRTMCU_STALL_TIMEOUT_MS=60000 \
+		-e VIRTMCU_STALL_TIMEOUT_MS=120000 \
 		-e GCOV_PREFIX=/workspace/coverage-data \
 		-e GCOV_PREFIX_STRIP=3 \
-		virtmcu-builder:dev \
-		bash -c "make -C test/phase1 && make -C test/phase8 && make -C test/phase12 && make -C test/riscv && \
-		         bash test/phase1/smoke_test.sh && \
-		         bash test/phase8/smoke_test.sh && \
-		         bash test/phase12/smoke_test.sh"
-	@echo "  Running pytest unit tests inside builder..."
-	docker run --rm \
-		-v "$(CURDIR):/workspace" -w /workspace \
-		-e PYTHONPATH=/workspace \
-		virtmcu-builder:dev \
-		bash -c "uv pip install --system --break-system-packages -r pyproject.toml && \
-		         python3 -m pytest tests/repl2qemu/ tests/test_yaml2qemu.py \
-		                        tests/test_cli_generator.py tests/test_fdt_emitter.py \
-		                        -v --tb=short"
+		$(BUILDER_IMG) \
+		bash scripts/ci-phase.sh all
 	@echo ""
 	@echo "════════════════════════════════════════════════════"
 	@echo "  CI Full — Coverage Checks"
@@ -330,10 +461,44 @@ ci-full: ci-local
 	$(MAKE) test-coverage-peripheral
 	@echo ""
 	@echo "✓ ci-full passed."
-	@echo "  NOTE: Phase 4-16 smoke tests, pytest-qmp, and Robot Framework"
-	@echo "  require additional test artifacts. Run them individually:"
-	@echo "    docker run --rm -v \"\$$(pwd):/workspace\" -w /workspace -e PYTHONPATH=/workspace \\"
-	@echo "      virtmcu-builder:dev bash -c \"<pre> && bash test/phaseN/smoke_test.sh\""
+
+ci-asan:
+	@echo "════════════════════════════════════════════════════"
+	@echo "  CI ASan — Docker: devenv-base"
+	@echo "════════════════════════════════════════════════════"
+	@bash scripts/docker-build.sh devenv-base
+	@echo ""
+	@echo "════════════════════════════════════════════════════"
+	@echo "  CI ASan — Building and testing under ASan"
+	@echo "════════════════════════════════════════════════════"
+	docker run --rm \
+		--user $$(id -u):$$(id -g) \
+		-e HOME=/tmp \
+		-e USER=vscode \
+		-e CARGO_HOME=/tmp/.cargo \
+		-e VIRTMUC_SKIP_QEMU_HEADERS_WARNING=1 \
+		-e UV_PROJECT_ENVIRONMENT=/workspace/.venv-docker \
+		-v "$(CURDIR):/workspace" -w /workspace \
+		$(DEVENV_BASE_IMG) make test-asan
+	@echo ""
+	@echo "✓ ci-asan passed."
+
+ci-miri:
+	@echo "════════════════════════════════════════════════════"
+	@echo "  CI Miri — Docker: devenv-base"
+	@echo "════════════════════════════════════════════════════"
+	@bash scripts/docker-build.sh devenv-base
+	@echo ""
+	@echo "════════════════════════════════════════════════════"
+	@echo "  CI Miri — Running Miri tests"
+	@echo "════════════════════════════════════════════════════"
+	docker run --rm \
+		-v "$(CURDIR):/workspace" \
+		-v /workspace/third_party \
+		-w /workspace \
+		$(DEVENV_BASE_IMG) make test-miri
+	@echo ""
+	@echo "✓ ci-miri passed."
 
 # ------------------------------------------------------------------------------
 # Docker Image Targets

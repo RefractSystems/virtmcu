@@ -69,20 +69,16 @@ const REG_BTN_STATE: u64 = 0x14;
 unsafe extern "C" fn zenoh_ui_read(opaque: *mut c_void, addr: u64, _size: c_uint) -> u64 {
     let s = &mut *(opaque as *mut ZenohUiQEMU);
     if addr == REG_LED_ID {
-        return s.active_led_id as u64;
+        return u64::from(s.active_led_id);
     }
     if addr == REG_BTN_ID {
-        return s.active_btn_id as u64;
+        return u64::from(s.active_btn_id);
     }
     if addr == REG_BTN_STATE {
         if s.rust_state.is_null() {
             return 0;
         }
-        return if zenoh_ui_get_button(&*s.rust_state, s.active_btn_id) {
-            1
-        } else {
-            0
-        };
+        return u64::from(zenoh_ui_get_button(&*s.rust_state, s.active_btn_id));
     }
     0
 }
@@ -130,27 +126,20 @@ unsafe extern "C" fn zenoh_ui_realize(dev: *mut c_void, errp: *mut *mut c_void) 
     let s = &mut *(dev as *mut ZenohUiQEMU);
 
     memory_region_init_io(
-        &mut s.mmio,
+        &raw mut s.mmio,
         dev as *mut Object,
-        &ZENOH_UI_OPS,
+        &raw const ZENOH_UI_OPS,
         dev,
         c"zenoh-ui".as_ptr(),
         0x100,
     );
-    sysbus_init_mmio(dev as *mut SysBusDevice, &mut s.mmio);
+    sysbus_init_mmio(dev as *mut SysBusDevice, &raw mut s.mmio);
 
-    let router_ptr = if s.router.is_null() {
-        ptr::null()
-    } else {
-        s.router as *const c_char
-    };
+    let router_ptr = if s.router.is_null() { ptr::null() } else { s.router.cast_const() };
 
     s.rust_state = zenoh_ui_init_internal(s.node_id, router_ptr);
     if s.rust_state.is_null() {
-        error_setg!(
-            errp as *mut *mut Error,
-            c"Failed to initialize Rust Zenoh UI".as_ptr()
-        );
+        error_setg!(errp, "Failed to initialize Rust Zenoh UI");
         return;
     }
 }
@@ -210,11 +199,7 @@ fn zenoh_ui_init_internal(node_id: u32, router: *const c_char) -> *mut ZenohUiSt
         }
     };
 
-    Box::into_raw(Box::new(ZenohUiState {
-        session,
-        node_id,
-        buttons: Mutex::new(HashMap::new()),
-    }))
+    Box::into_raw(Box::new(ZenohUiState { session, node_id, buttons: Mutex::new(HashMap::new()) }))
 }
 
 fn zenoh_ui_set_led(state: &ZenohUiState, led_id: u32, on: bool) {
@@ -224,12 +209,12 @@ fn zenoh_ui_set_led(state: &ZenohUiState, led_id: u32, on: bool) {
 }
 
 fn zenoh_ui_get_button(state: &ZenohUiState, btn_id: u32) -> bool {
-    let btns = state.buttons.lock().unwrap();
-    btns.get(&btn_id).map(|b| b.pressed).unwrap_or(false)
+    let btns = state.buttons.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    btns.get(&btn_id).is_some_and(|b| b.pressed)
 }
 
 fn zenoh_ui_ensure_button(state: &ZenohUiState, btn_id: u32, irq: qemu_irq) {
-    let mut btns = state.buttons.lock().unwrap();
+    let mut btns = state.buttons.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if btns.contains_key(&btn_id) {
         return;
     }
@@ -249,19 +234,27 @@ fn zenoh_ui_ensure_button(state: &ZenohUiState, btn_id: u32, irq: qemu_irq) {
 
             unsafe {
                 virtmcu_qom::sync::virtmcu_bql_lock();
-                qemu_set_irq(irq_ptr as qemu_irq, if val { 1 } else { 0 });
+                qemu_set_irq(irq_ptr as qemu_irq, i32::from(val));
                 virtmcu_qom::sync::virtmcu_bql_unlock();
             }
         })
         .wait()
         .ok();
 
-    btns.insert(
-        btn_id,
-        ButtonState {
-            irq,
-            subscriber,
-            pressed: false,
-        },
-    );
+    btns.insert(btn_id, ButtonState { irq, subscriber, pressed: false });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_zenoh_ui_qemu_layout() {
+        // QOM layout validation
+        assert_eq!(
+            core::mem::offset_of!(ZenohUiQEMU, parent_obj),
+            0,
+            "SysBusDevice must be the first field"
+        );
+    }
 }

@@ -24,7 +24,7 @@ async def test_uart_hi_output(qmp_bridge):
     # but our bridge starts reading from the socket immediately.
     # If it's already in the buffer, this should return True immediately.
     found = await qmp_bridge.wait_for_line_on_uart("HI", timeout=5.0)
-    assert found, f"Did not find 'HI' in UART buffer. Current buffer: {repr(qmp_bridge.uart_buffer)}"
+    assert found, f"Did not find 'HI' in UART buffer. Current buffer: {qmp_bridge.uart_buffer!r}"
 
 
 @pytest.mark.asyncio

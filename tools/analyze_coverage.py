@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 import argparse
-import os
 import struct
 import sys
+from bisect import bisect_left, bisect_right
+from pathlib import Path
 
 from elftools.elf.elffile import ELFFile
 from elftools.elf.sections import SymbolTableSection
 
 
 def parse_drcov(filename):
-    if not os.path.exists(filename):
+    if not Path(filename).exists():
         print(f"Error: Coverage file {filename} not found")
         return []
 
-    with open(filename, "rb") as f:
+    with Path(filename).open("rb") as f:
         content = f.read()
 
     # Simple search for "BB Table: "
@@ -40,19 +41,35 @@ def parse_drcov(filename):
         entry = data[i * entry_size : (i + 1) * entry_size]
         if len(entry) < entry_size:
             break
-        start, size, mod_id = struct.unpack("<IHH", entry)
-        bbs.append((start, size))
+        start, size, _mod_id = struct.unpack("<IHH", entry)
+        bbs.append((start, start + size))
 
     return bbs
 
 
+def merge_intervals(intervals):
+    if not intervals:
+        return []
+    intervals.sort()
+    merged = []
+    curr_start, curr_end = intervals[0]
+    for next_start, next_end in intervals[1:]:
+        if next_start <= curr_end:
+            curr_end = max(curr_end, next_end)
+        else:
+            merged.append((curr_start, curr_end))
+            curr_start, curr_end = next_start, next_end
+    merged.append((curr_start, curr_end))
+    return merged
+
+
 def get_elf_symbols(elf_path):
     symbols = []
-    if not os.path.exists(elf_path):
+    if not Path(elf_path).exists():
         print(f"Error: ELF file {elf_path} not found")
         return []
 
-    with open(elf_path, "rb") as f:
+    with Path(elf_path).open("rb") as f:
         elffile = ELFFile(f)
         for section in elffile.iter_sections():
             if not isinstance(section, SymbolTableSection):
@@ -60,9 +77,13 @@ def get_elf_symbols(elf_path):
 
             for symbol in section.iter_symbols():
                 # We care about text symbols
-                if symbol["st_info"]["type"] in ["STT_FUNC", "STT_NOTYPE"] and symbol["st_value"] != 0:
-                    if symbol.name and not symbol.name.startswith("$"):  # Skip ARM mapping symbols
-                        symbols.append({"name": symbol.name, "address": symbol["st_value"], "size": symbol["st_size"]})
+                if (
+                    symbol["st_info"]["type"] in ["STT_FUNC", "STT_NOTYPE"]
+                    and symbol["st_value"] != 0
+                    and symbol.name
+                    and not symbol.name.startswith("$")
+                ):
+                    symbols.append({"name": symbol.name, "address": symbol["st_value"], "size": symbol["st_size"]})
 
     # Sort and remove duplicates or handle overlaps
     symbols = sorted(symbols, key=lambda x: x["address"])
@@ -79,6 +100,28 @@ def get_elf_symbols(elf_path):
     return symbols
 
 
+def calculate_coverage(sym_start, sym_end, executed_intervals):
+    # Use binary search to find relevant intervals
+    # executed_intervals are sorted and non-overlapping
+    # find first interval that ends after sym_start
+    starts = [i[0] for i in executed_intervals]
+    ends = [i[1] for i in executed_intervals]
+
+    idx_start = bisect_right(ends, sym_start)
+    idx_end = bisect_left(starts, sym_end)
+
+    exec_bytes = 0
+    for i in range(idx_start, idx_end):
+        interval_start, interval_end = executed_intervals[i]
+        # Intersection of [sym_start, sym_end) and [interval_start, interval_end)
+        intersect_start = max(sym_start, interval_start)
+        intersect_end = min(sym_end, interval_end)
+        if intersect_end > intersect_start:
+            exec_bytes += intersect_end - intersect_start
+
+    return exec_bytes
+
+
 def main():
     parser = argparse.ArgumentParser(description="Analyze Guest Firmware Coverage")
     parser.add_argument("drcov", help="Path to .drcov file")
@@ -88,10 +131,12 @@ def main():
 
     args = parser.parse_args()
 
-    bbs = parse_drcov(args.drcov)
-    if not bbs:
+    bb_intervals = parse_drcov(args.drcov)
+    if not bb_intervals:
         print("No execution data found.")
         sys.exit(1)
+
+    executed_intervals = merge_intervals(bb_intervals)
 
     symbols = get_elf_symbols(args.elf)
     if not symbols:
@@ -99,18 +144,10 @@ def main():
         sys.exit(1)
 
     print(f"Coverage Report for {args.elf}")
-    print(f"BBs: {len(bbs)}, Functions: {len(symbols)}")
+    print(f"BBs: {len(bb_intervals)}, Functions: {len(symbols)}")
     print("-" * 60)
     print(f"{'Function Name':<30} {'Executed?':<10} {'Coverage':<10}")
     print("-" * 60)
-
-    # Create a set of all executed addresses for O(1) lookup
-    executed_addresses = set()
-    for bb_start, bb_size in bbs:
-        # We only care about addresses that are within the range of our symbols
-        # to keep the set size reasonable.
-        for addr in range(bb_start, bb_start + bb_size):
-            executed_addresses.add(addr)
 
     total_func_size = 0
     total_exec_size = 0
@@ -124,12 +161,7 @@ def main():
         if size == 0:
             continue
 
-        # Count how many bytes in this symbol range were executed
-        exec_count = 0
-        for i in range(addr, addr + size):
-            if i in executed_addresses:
-                exec_count += 1
-
+        exec_count = calculate_coverage(addr, addr + size, executed_intervals)
         coverage = (exec_count / size) * 100 if size > 0 else 0
         executed = "Yes" if exec_count > 0 else "No"
 

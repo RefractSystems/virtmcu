@@ -1,15 +1,17 @@
-import os
+import json
 import socket
 import struct
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 VIRTMCU_PROTO_MAGIC = 0x564D4355
 VIRTMCU_PROTO_VERSION = 1
 SYSC_MSG_RESP = 0
 SYSC_MSG_IRQ_SET = 1
 SYSC_MSG_IRQ_CLEAR = 2
+
 
 def run_qmp_cmd(sock_path, cmd):
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -23,8 +25,6 @@ def run_qmp_cmd(sock_path, cmd):
     s.close()
     return json.loads(resp.decode())
 
-import json
-
 
 def main():
     sock_path = "/tmp/irq_test.sock"
@@ -32,7 +32,8 @@ def main():
     dtb_path = "/tmp/irq_test.dtb"
     elf_path = "/tmp/irq_test.elf"
 
-    if os.path.exists(sock_path): os.remove(sock_path)
+    if Path(sock_path).exists():
+        Path(sock_path).unlink()
 
     # 1. Start QEMU
     # We need a firmware that enables interrupts or we check NVIC state via QMP/monitor
@@ -50,18 +51,27 @@ def main():
     bridge@50000000 {{ compatible = "mmio-socket-bridge"; reg = <0x0 0x50000000 0x0 0x1000>; socket-path = "{sock_path}"; region-size = <0x1000>; }};
 }};
 """
-    with open("/tmp/irq_test.dts", "w") as f: f.write(dts)
+    with Path("/tmp/irq_test.dts").open("w") as f:
+        f.write(dts)
     subprocess.run(["dtc", "-I", "dts", "-O", "dtb", "-o", dtb_path, "/tmp/irq_test.dts"])
 
-    with open("/tmp/irq_test.S", "w") as f: f.write(".global _start\n_start:\nwfi\nb _start\n")
-    subprocess.run(["arm-none-eabi-gcc", "-mcpu=cortex-a15", "-nostdlib", "-Ttext=0x40000000", "/tmp/irq_test.S", "-o", elf_path])
+    with Path("/tmp/irq_test.S").open("w") as f:
+        f.write(".global _start\n_start:\nwfi\nb _start\n")
+    subprocess.run(
+        ["arm-none-eabi-gcc", "-mcpu=cortex-a15", "-nostdlib", "-Ttext=0x40000000", "/tmp/irq_test.S", "-o", elf_path]
+    )
 
     qemu_cmd = [
         "/workspace/third_party/qemu/build-virtmcu/install/bin/qemu-system-arm",
-        "-M", "arm-generic-fdt,hw-dtb=" + dtb_path,
-        "-kernel", elf_path,
-        "-nographic", "-monitor", "none",
-        "-qmp", f"unix:{qmp_path},server,nowait"
+        "-M",
+        "arm-generic-fdt,hw-dtb=" + dtb_path,
+        "-kernel",
+        elf_path,
+        "-nographic",
+        "-monitor",
+        "none",
+        "-qmp",
+        f"unix:{qmp_path},server,nowait",
     ]
 
     qemu_proc = subprocess.Popen(qemu_cmd)
@@ -78,7 +88,7 @@ def main():
             server.settimeout(0.1)
             conn, _ = server.accept()
             break
-        except socket.timeout:
+        except TimeoutError:
             continue
 
     if not conn:
@@ -101,9 +111,9 @@ def main():
     print("NVIC state (IRQ SET):\n", resp.get("return", ""))
 
     if "5: 1" not in resp.get("return", "") and "5:  1" not in resp.get("return", ""):
-         # Cortex-A15 GIC might show differently. "info pic" output varies.
-         # Let's check for any indication of IRQ 5 being active.
-         pass # We will refine the check based on output
+        # Cortex-A15 GIC might show differently. "info pic" output varies.
+        # Let's check for any indication of IRQ 5 being active.
+        pass  # We will refine the check based on output
 
     print("Clearing IRQ 5...")
     conn.sendall(struct.pack("<IIQ", SYSC_MSG_IRQ_CLEAR, 5, 0))
@@ -116,6 +126,7 @@ def main():
     conn.close()
     server.close()
     print("Test passed!")
+
 
 if __name__ == "__main__":
     main()

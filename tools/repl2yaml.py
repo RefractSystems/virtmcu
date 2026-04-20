@@ -8,7 +8,8 @@
 # ==============================================================================
 
 import argparse
-import os
+from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -17,14 +18,17 @@ from .repl2qemu.parser import parse_repl
 
 def migrate(repl_path: str, yaml_path: str):
     print(f"Reading Renode platform: {repl_path}")
-    with open(repl_path, "r") as f:
+    with Path(repl_path).open() as f:
         plat = parse_repl(f.read())
 
     # Build the YAML structure
     # We try to infer a sensible machine name from the filename
-    machine_name = os.path.splitext(os.path.basename(repl_path))[0]
+    machine_name = Path(repl_path).stem
 
-    output = {"machine": {"name": machine_name, "type": "arm-generic-fdt", "cpus": []}, "peripherals": []}
+    output: dict[str, Any] = {
+        "machine": {"name": machine_name, "type": "arm-generic-fdt", "cpus": []},
+        "peripherals": [],
+    }
 
     for dev in plat.devices:
         # Separate CPUs from Peripherals for better hierarchical structure
@@ -34,7 +38,7 @@ def migrate(repl_path: str, yaml_path: str):
             continue
 
         # Normal peripheral
-        p = {
+        p: dict[str, Any] = {
             "name": dev.name,
             "renode_type": dev.type_name,
             "address": dev.address_str,
@@ -55,7 +59,7 @@ def migrate(repl_path: str, yaml_path: str):
         output["peripherals"].append(p)
 
     print(f"Writing virtmcu YAML: {yaml_path}")
-    with open(yaml_path, "w") as f:
+    with Path(yaml_path).open("w") as f:
         yaml.dump(output, f, sort_keys=False, default_flow_style=False)
 
 
@@ -66,7 +70,7 @@ def main():
 
     args = parser.parse_args()
 
-    out_path = args.out if args.out else os.path.splitext(args.input)[0] + ".yaml"
+    out_path = args.out if args.out else Path(args.input).stem + ".yaml"
     migrate(args.input, out_path)
 
 

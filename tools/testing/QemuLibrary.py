@@ -6,12 +6,12 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import List, Optional, Tuple, Union
+from pathlib import Path
 
 # Ensure workspace root is in sys.path for Robot Framework environments
-workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
-if workspace_root not in sys.path:
-    sys.path.insert(0, workspace_root)
+workspace_root = Path(__file__).resolve().parent / "../../"
+if str(workspace_root) not in sys.path:
+    sys.path.insert(0, str(workspace_root))
 
 from tools.testing.qmp_bridge import QmpBridge  # noqa: E402
 
@@ -31,8 +31,8 @@ class QemuLibrary:
         # running loop exists, and raises RuntimeError in 3.12.
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
-        self.proc: Optional[subprocess.Popen] = None
-        self.tmpdir: Optional[str] = None
+        self.proc: subprocess.Popen | None = None
+        self.tmpdir: str | None = None
 
     def _run(self, coro):
         if self.loop.is_closed():
@@ -41,21 +41,21 @@ class QemuLibrary:
         return self.loop.run_until_complete(coro)
 
     def launch_qemu(
-        self, dtb_path: str, kernel_path: Optional[str] = None, extra_args: Optional[Union[str, List[str]]] = None
-    ) -> Tuple[str, str]:
+        self, dtb_path: str, kernel_path: str | None = None, extra_args: str | list[str] | None = None
+    ) -> tuple[str, str]:
         """
         Launches QEMU using the run.sh script and returns the QMP and UART socket paths.
         """
         tmpdir = tempfile.mkdtemp(prefix="virtmcu-robot-")
-        qmp_sock = os.path.join(tmpdir, "qmp.sock")
-        uart_sock = os.path.join(tmpdir, "uart.sock")
+        qmp_sock = Path(tmpdir) / "qmp.sock"
+        uart_sock = Path(tmpdir) / "uart.sock"
 
-        workspace_root = os.getcwd()
-        run_script = os.path.join(workspace_root, "scripts/run.sh")
+        workspace_root = Path.cwd()
+        run_script = workspace_root / "scripts/run.sh"
 
-        cmd = [run_script, "--dtb", os.path.abspath(dtb_path)]
+        cmd = [str(run_script), "--dtb", str(Path(dtb_path).resolve())]
         if kernel_path:
-            cmd.extend(["--kernel", os.path.abspath(kernel_path)])
+            cmd.extend(["--kernel", str(Path(kernel_path).resolve())])
 
         cmd.extend(
             [
@@ -76,7 +76,7 @@ class QemuLibrary:
                 cmd.extend(extra_args)
 
         self.proc = subprocess.Popen(
-            cmd,
+            [str(arg) for arg in cmd],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=os.environ.copy(),
@@ -92,7 +92,7 @@ class QemuLibrary:
                     f"QEMU exited unexpectedly (rc={self.proc.returncode}) before sockets appeared.\n"
                     f"STDOUT: {stdout.decode()}\nSTDERR: {stderr.decode()}"
                 )
-            if os.path.exists(qmp_sock) and os.path.exists(uart_sock):
+            if Path(qmp_sock).exists() and Path(uart_sock).exists():
                 break
             time.sleep(0.1)
         else:
@@ -102,9 +102,9 @@ class QemuLibrary:
                 f"QEMU sockets did not appear in time. STDOUT: {stdout.decode()} STDERR: {stderr.decode()}"
             )
 
-        return qmp_sock, uart_sock
+        return str(qmp_sock), str(uart_sock)
 
-    def connect_to_qemu(self, qmp_socket_path: str, uart_socket_path: Optional[str] = None):
+    def connect_to_qemu(self, qmp_socket_path: str, uart_socket_path: str | None = None):
         """
         Connects to the QEMU QMP and UART sockets.
         """
@@ -128,15 +128,14 @@ class QemuLibrary:
         """
         self._run(self.bridge.execute("system_reset"))
 
-    def wait_for_line_on_uart(self, pattern: str, timeout: Union[float, str] = 10.0):
+    def wait_for_line_on_uart(self, pattern: str, timeout: float | str = 10.0):
         """
         Waits for a specific pattern to appear on the UART.
         """
         found = self._run(self.bridge.wait_for_line_on_uart(pattern, float(timeout)))
         if not found:
             raise AssertionError(
-                f"Pattern '{pattern}' not found on UART within {timeout}s. "
-                f"Current buffer: {repr(self.bridge.uart_buffer)}"
+                f"Pattern '{pattern}' not found on UART within {timeout}s. Current buffer: {self.bridge.uart_buffer!r}"
             )
 
     def write_to_uart(self, text: str):
@@ -145,7 +144,7 @@ class QemuLibrary:
         """
         self._run(self.bridge.write_to_uart(text))
 
-    def pc_should_be_equal(self, expected_pc: Union[int, str]):
+    def pc_should_be_equal(self, expected_pc: int | str):
         """
         Asserts that the current Program Counter is equal to the expected value.
         """

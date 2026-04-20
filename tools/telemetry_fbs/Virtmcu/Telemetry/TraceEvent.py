@@ -8,7 +8,7 @@ from flatbuffers.compat import import_numpy
 np = import_numpy()
 
 
-class TraceEvent(object):
+class TraceEvent:
     __slots__ = ["_tab"]
 
     @classmethod

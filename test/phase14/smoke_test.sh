@@ -22,7 +22,13 @@ echo "✓ DTB contains radio0 node."
 
 # 4. Check coordinator build
 echo "Verifying coordinator..."
-cd tools/zenoh_coordinator && cargo build -q
+if [ -f "../../tools/zenoh_coordinator/target/release/zenoh_coordinator" ]; then
+    echo "Using pre-built release coordinator."
+elif [ -f "../../tools/zenoh_coordinator/target/debug/zenoh_coordinator" ]; then
+    echo "Using pre-built debug coordinator."
+else
+    cd tools/zenoh_coordinator && cargo build -q
+fi
 echo "✓ Coordinator builds successfully."
 
 echo "Phase 14 Smoke Test PASSED."

@@ -333,7 +333,7 @@ class TestMmioReq:
 
     def test_write_round_trip(self):
         raw = encode_mmio_req(MMIO_REQ_WRITE, 4, 1_000_000, 0x4000_0000, 0xDEAD_BEEF)
-        t, sz, vtime, addr, data = decode_mmio_req(raw)
+        t, sz, _vtime, addr, data = decode_mmio_req(raw)
         assert t == MMIO_REQ_WRITE
         assert sz == 4
         assert addr == 0x4000_0000
@@ -479,7 +479,7 @@ class DeliveryPacket:
     vtime: int
     data: bytes = field(default=b"", compare=False)
 
-    def __lt__(self, other: "DeliveryPacket") -> bool:
+    def __lt__(self, other: DeliveryPacket) -> bool:
         return self.vtime < other.vtime
 
     def __eq__(self, other: object) -> bool:

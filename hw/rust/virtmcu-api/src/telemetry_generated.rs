@@ -24,11 +24,8 @@ pub mod virtmcu {
             note = "Use associated constants instead. This will no longer be generated in 2021."
         )]
         #[allow(non_camel_case_types)]
-        pub const ENUM_VALUES_TRACE_EVENT_TYPE: [TraceEventType; 3] = [
-            TraceEventType::CPU_STATE,
-            TraceEventType::IRQ,
-            TraceEventType::PERIPHERAL,
-        ];
+        pub const ENUM_VALUES_TRACE_EVENT_TYPE: [TraceEventType; 3] =
+            [TraceEventType::CPU_STATE, TraceEventType::IRQ, TraceEventType::PERIPHERAL];
 
         #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
         #[repr(transparent)]
@@ -115,9 +112,7 @@ pub mod virtmcu {
             type Inner = TraceEvent<'a>;
             #[inline]
             unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-                Self {
-                    _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
-                }
+                Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
             }
         }
 
@@ -158,11 +153,7 @@ pub mod virtmcu {
                 // Safety:
                 // Created from valid Table for this object
                 // which contains a valid value in this slot
-                unsafe {
-                    self._tab
-                        .get::<u64>(TraceEvent::VT_TIMESTAMP_NS, Some(0))
-                        .unwrap()
-                }
+                unsafe { self._tab.get::<u64>(TraceEvent::VT_TIMESTAMP_NS, Some(0)).unwrap() }
             }
             #[inline]
             pub fn type_(&self) -> TraceEventType {
@@ -233,7 +224,7 @@ pub mod virtmcu {
             pub value: u32,
             pub device_name: Option<::flatbuffers::WIPOffset<&'a str>>,
         }
-        impl<'a> Default for TraceEventArgs<'a> {
+        impl Default for TraceEventArgs<'_> {
             #[inline]
             fn default() -> Self {
                 TraceEventArgs {
@@ -253,8 +244,7 @@ pub mod virtmcu {
         impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> TraceEventBuilder<'a, 'b, A> {
             #[inline]
             pub fn add_timestamp_ns(&mut self, timestamp_ns: u64) {
-                self.fbb_
-                    .push_slot::<u64>(TraceEvent::VT_TIMESTAMP_NS, timestamp_ns, 0);
+                self.fbb_.push_slot::<u64>(TraceEvent::VT_TIMESTAMP_NS, timestamp_ns, 0);
             }
             #[inline]
             pub fn add_type_(&mut self, type_: TraceEventType) {
@@ -284,10 +274,7 @@ pub mod virtmcu {
                 _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
             ) -> TraceEventBuilder<'a, 'b, A> {
                 let start = _fbb.start_table();
-                TraceEventBuilder {
-                    fbb_: _fbb,
-                    start_: start,
-                }
+                TraceEventBuilder { fbb_: _fbb, start_: start }
             }
             #[inline]
             pub fn finish(self) -> ::flatbuffers::WIPOffset<TraceEvent<'a>> {

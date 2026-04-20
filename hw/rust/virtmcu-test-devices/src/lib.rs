@@ -1,5 +1,6 @@
+#![allow(missing_docs)]
 #![no_std]
-#![allow(clippy::missing_safety_doc)]
+#![allow(clippy::missing_safety_doc, dead_code)]
 
 use core::ffi::{c_int, c_void};
 use virtmcu_qom::chardev::{qemu_chr_fe_set_handlers, CharFrontend};
@@ -8,10 +9,15 @@ use virtmcu_qom::qom::{ObjectClass, TypeInfo};
 use virtmcu_qom::ssi::{SSIPeripheral, SSIPeripheralClass, TYPE_SSI_PERIPHERAL};
 use virtmcu_qom::{define_prop_chr, define_properties, device_class, ssi_peripheral_class};
 
+#[cfg(not(test))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop {}
 }
+
+#[cfg(not(test))]
+#[no_mangle]
+pub extern "C" fn rust_eh_personality() {}
 
 /* ── SPI Echo Device ──────────────────────────────────────────────────────── */
 
@@ -61,13 +67,13 @@ unsafe extern "C" fn uart_echo_can_receive(_opaque: *mut c_void) -> c_int {
 unsafe extern "C" fn uart_echo_receive(opaque: *mut c_void, buf: *const u8, size: c_int) {
     let s = &mut *(opaque as *mut UARTEcho);
     // Echo back to the same chardev
-    virtmcu_qom::chardev::qemu_chr_fe_write(&mut s.chr, buf, size);
+    virtmcu_qom::chardev::qemu_chr_fe_write(&raw mut s.chr, buf, size);
 }
 
 unsafe extern "C" fn uart_echo_realize(dev: *mut c_void, _errp: *mut *mut c_void) {
     let s = &mut *(dev as *mut UARTEcho);
     qemu_chr_fe_set_handlers(
-        &mut s.chr,
+        &raw mut s.chr,
         Some(uart_echo_can_receive),
         Some(uart_echo_receive),
         None,
@@ -78,10 +84,7 @@ unsafe extern "C" fn uart_echo_realize(dev: *mut c_void, _errp: *mut *mut c_void
     );
 }
 
-define_properties!(
-    UART_ECHO_PROPS,
-    [define_prop_chr!(c"chardev".as_ptr(), UARTEcho, chr),]
-);
+define_properties!(UART_ECHO_PROPS, [define_prop_chr!(c"chardev".as_ptr(), UARTEcho, chr),]);
 
 unsafe extern "C" fn uart_echo_class_init(klass: *mut ObjectClass, _data: *const c_void) {
     let dc = device_class!(klass);
@@ -107,15 +110,17 @@ static UART_ECHO_TYPE_INFO: TypeInfo = TypeInfo {
 
 /* ── Registration ─────────────────────────────────────────────────────────── */
 
+#[cfg(not(test))]
 #[no_mangle]
 pub extern "C" fn test_devices_type_init() {
     unsafe {
-        virtmcu_qom::qom::type_register_static(&SPI_ECHO_TYPE_INFO);
-        virtmcu_qom::qom::type_register_static(&UART_ECHO_TYPE_INFO);
+        virtmcu_qom::qom::type_register_static(&raw const SPI_ECHO_TYPE_INFO);
+        virtmcu_qom::qom::type_register_static(&raw const UART_ECHO_TYPE_INFO);
     }
 }
 
 // Use a custom DSO init pointer to register both types
+#[cfg(not(test))]
 #[used]
 #[allow(non_upper_case_globals)]
 #[cfg_attr(target_os = "linux", link_section = ".init_array")]

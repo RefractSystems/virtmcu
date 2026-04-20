@@ -2,40 +2,63 @@ use crate::qom::{Object, ObjectClass};
 use core::ffi::{c_char, c_int, c_void};
 
 #[repr(C)]
+/// A struct
 pub struct Chardev {
+    /// A struct field
     pub parent_obj: Object,
+    /// A struct field
     pub label: *mut c_char,
+    /// A struct field
     pub filename: *mut c_char,
+    /// A struct field
     pub log_append: bool,
     _padding: [u8; 7],
-    pub log_chan: *mut c_void,    // QIOChannel *
-    pub be: *mut c_void,          // CharFrontend *
-    pub gcontext: *mut c_void,    // GMainContext *
+    /// A struct field
+    pub log_chan: *mut c_void, // QIOChannel *
+    /// A struct field
+    pub be: *mut c_void, // CharFrontend *
+    /// A struct field
+    pub gcontext: *mut c_void, // GMainContext *
+    /// A struct field
     pub chr_write_lock: [u8; 64], // QemuMutex
     _opaque: [u8; 160 - 40 - 8 - 8 - 1 - 7 - 8 - 8 - 8 - 64],
 }
 
 #[repr(C)]
 #[derive(Default)]
+/// A struct
 pub struct CharFrontend {
+    /// A struct field
     pub chr: *mut Chardev,
+    /// A struct field
     pub chr_event: Option<unsafe extern "C" fn(opaque: *mut c_void, event: c_int)>,
+    /// A struct field
     pub chr_can_read: Option<unsafe extern "C" fn(opaque: *mut c_void) -> c_int>,
+    /// A struct field
     pub chr_read: Option<unsafe extern "C" fn(opaque: *mut c_void, buf: *const u8, size: c_int)>,
+    /// A struct field
     pub chr_be_change: Option<unsafe extern "C" fn(opaque: *mut c_void) -> c_int>,
+    /// A struct field
     pub opaque: *mut c_void,
+    /// A struct field
     pub tag: core::ffi::c_uint,
+    /// A struct field
     pub fe_is_open: bool,
 }
 
 #[repr(C)]
+/// A struct
 pub struct ChardevClass {
+    /// A struct field
     pub parent_class: ObjectClass, // 96
-    pub internal: bool,            // 96
-    _padding: [u8; 7],             // 97
+    /// A struct field
+    pub internal: bool, // 96
+    _padding: [u8; 7], // 97
+    /// A struct field
     pub chr_parse: Option<
         unsafe extern "C" fn(opts: *mut c_void, backend: *mut c_void, errp: *mut *mut c_void),
     >, // 104
+    /// A struct field
     pub chr_open: Option<
         unsafe extern "C" fn(
             chr: *mut Chardev,
@@ -43,18 +66,24 @@ pub struct ChardevClass {
             errp: *mut *mut c_void,
         ) -> bool,
     >, // 112
+    /// A struct field
     pub chr_write:
         Option<unsafe extern "C" fn(chr: *mut Chardev, buf: *const u8, len: c_int) -> c_int>, // 120
     _opaque: [u8; 256 - 128],
 }
 
 extern "C" {
+    /// A function
     pub fn qemu_chr_be_write(s: *mut Chardev, buf: *const u8, len: usize);
+    /// A function
     pub fn qemu_chr_be_can_write(s: *mut Chardev) -> core::ffi::c_int;
 
+    /// A function
     pub fn qemu_chr_fe_init(be: *mut CharFrontend, s: *mut Chardev, errp: *mut *mut c_void)
         -> bool;
+    /// A function
     pub fn qemu_chr_fe_deinit(be: *mut CharFrontend, del: bool);
+    /// A function
     pub fn qemu_chr_fe_set_handlers(
         be: *mut CharFrontend,
         fd_can_read: Option<unsafe extern "C" fn(opaque: *mut c_void) -> c_int>,
@@ -65,9 +94,12 @@ extern "C" {
         context: *mut c_void,
         set_open: bool,
     );
+    /// A function
     pub fn qemu_chr_fe_write(be: *mut CharFrontend, buf: *const u8, len: c_int) -> c_int;
+    /// A function
     pub fn qemu_chr_fe_write_all(be: *mut CharFrontend, buf: *const u8, len: c_int) -> c_int;
 
+    /// A static
     pub static qdev_prop_chr: crate::qdev::PropertyInfo;
 }
 

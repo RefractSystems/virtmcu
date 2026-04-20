@@ -10,7 +10,12 @@ WORKSPACE_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TMPDIR_LOCAL="$(mktemp -d /tmp/uart_stress_XXXXXX)"
 QEMU_PID=""
 ROUTER_PID=""
-PORT=7448
+PORT=${1:-0}
+
+if [ "$PORT" -eq 0 ]; then
+    # Find a free port using python
+    PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("", 0)); print(s.getsockname()[1]); s.close()')
+fi
 
 cleanup() {
     echo "Cleaning up..."

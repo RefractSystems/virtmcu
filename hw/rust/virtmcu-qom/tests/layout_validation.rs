@@ -1,9 +1,12 @@
+#![cfg(qemu_headers_present)]
 include!(concat!(env!("OUT_DIR"), "/qemu_bindings.rs"));
 
 use virtmcu_qom::chardev::{Chardev, ChardevClass};
 use virtmcu_qom::cpu::CPUState;
 use virtmcu_qom::memory::{MemoryRegion, MemoryRegionOps};
-use virtmcu_qom::net::{NetClientInfo, NetClientState};
+use virtmcu_qom::net::{
+    CanBusClientInfo, CanBusClientState, CanHostState, NetClientInfo, NetClientState, QemuCanFrame,
+};
 use virtmcu_qom::qdev::{DeviceClass, DeviceState, SysBusDevice};
 use virtmcu_qom::qom::{ObjectClass, Property, TypeInfo};
 use virtmcu_qom::sync::{QemuCond, QemuMutex};
@@ -28,12 +31,7 @@ macro_rules! assert_offset_match {
         assert_eq!(
             core::mem::offset_of!($our_type, $field),
             core::mem::offset_of!(qemu::$qemu_type, $field),
-            concat!(
-                "Offset mismatch for ",
-                stringify!($our_type),
-                "::",
-                stringify!($field)
-            )
+            concat!("Offset mismatch for ", stringify!($our_type), "::", stringify!($field))
         );
     };
 }
@@ -61,6 +59,11 @@ fn test_qom_layouts() {
 
     assert_layout_match!(NetClientState, NetClientState);
     assert_layout_match!(NetClientInfo, NetClientInfo);
+
+    assert_layout_match!(CanBusClientState, CanBusClientState);
+    assert_layout_match!(CanBusClientInfo, CanBusClientInfo);
+    assert_layout_match!(QemuCanFrame, qemu_can_frame);
+    assert_layout_match!(CanHostState, CanHostState);
 
     assert_layout_match!(CPUState, CPUState);
     assert_offset_match!(CPUState, CPUState, cpu_index);

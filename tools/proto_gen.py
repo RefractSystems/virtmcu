@@ -7,12 +7,12 @@ stay exactly in sync with the C structs, preventing "version drift" and
 struct.unpack alignment bugs.
 """
 
-import os
 import re
+from pathlib import Path
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROTO_H_PATH = os.path.join(os.path.dirname(SCRIPT_DIR), "hw", "misc", "virtmcu_proto.h")
-OUT_PY_PATH = os.path.join(SCRIPT_DIR, "vproto.py")
+SCRIPT_DIR = Path(Path(__file__).resolve().parent)
+PROTO_H_PATH = SCRIPT_DIR.parent / "hw" / "misc" / "virtmcu_proto.h"
+OUT_PY_PATH = Path(SCRIPT_DIR) / "vproto.py"
 
 TYPE_MAP = {
     "uint8_t": "B",
@@ -27,7 +27,7 @@ TYPE_MAP = {
 
 
 def parse_header():
-    with open(PROTO_H_PATH, "r") as f:
+    with Path(PROTO_H_PATH).open() as f:
         content = f.read()
 
     # Extract Defines
@@ -90,7 +90,7 @@ def generate_python(defines, structs):
 
         out.append("@dataclass")
         out.append(f"class {class_name}:")
-        for f_name, f_fmt, c_type in fields:
+        for f_name, _f_fmt, c_type in fields:
             out.append(f"    {f_name}: int  # {c_type}")
 
         out.append("")
@@ -114,6 +114,6 @@ def generate_python(defines, structs):
 if __name__ == "__main__":
     defines, structs = parse_header()
     py_code = generate_python(defines, structs)
-    with open(OUT_PY_PATH, "w") as f:
+    with Path(OUT_PY_PATH).open("w") as f:
         f.write(py_code)
     print(f"Generated {OUT_PY_PATH}")

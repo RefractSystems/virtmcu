@@ -4,8 +4,8 @@ import logging
 import os
 import sys
 import tempfile
-from contextlib import redirect_stderr, redirect_stdout
-from typing import Dict, Optional
+from contextlib import redirect_stderr, redirect_stdout, suppress
+from pathlib import Path
 
 from tools.testing.qmp_bridge import QmpBridge
 
@@ -15,17 +15,17 @@ logger = logging.getLogger(__name__)
 class NodeContext:
     def __init__(self, node_id: str):
         self.node_id = node_id
-        self.process: Optional[asyncio.subprocess.Process] = None
+        self.process: asyncio.subprocess.Process | None = None
         self.qmp_bridge = QmpBridge()
         self.qmp_socket_path = f"/tmp/virtmcu-{node_id}.qmp"
         self.uart_socket_path = f"/tmp/virtmcu-{node_id}.uart"
-        self.yaml_path: Optional[str] = None
-        self.firmware_path: Optional[str] = None
+        self.yaml_path: str | None = None
+        self.firmware_path: str | None = None
 
 
 class NodeManager:
     def __init__(self):
-        self.nodes: Dict[str, NodeContext] = {}
+        self.nodes: dict[str, NodeContext] = {}
         self._zenoh_session = None
 
     def get_zenoh_session(self):
@@ -73,7 +73,7 @@ class NodeManager:
                         yaml2qemu_main()
                     except SystemExit as e:
                         if e.code != 0:
-                            raise ValueError(f"yaml2qemu failed with code {e.code}: {f_err.getvalue()}")
+                            raise ValueError(f"yaml2qemu failed with code {e.code}: {f_err.getvalue()}") from e
                     finally:
                         sys.argv = old_argv
                 else:
@@ -86,30 +86,30 @@ class NodeManager:
                         repl2qemu_main()
                     except SystemExit as e:
                         if e.code != 0:
-                            raise ValueError(f"repl2qemu failed with code {e.code}: {f_err.getvalue()}")
+                            raise ValueError(f"repl2qemu failed with code {e.code}: {f_err.getvalue()}") from e
                     finally:
                         sys.argv = old_argv
         except (Exception, BaseException) as e:
-            if os.path.exists(path):
-                os.remove(path)
-            if os.path.exists(dtb_path):
-                os.remove(dtb_path)
+            if Path(path).exists():
+                Path(path).unlink()
+            if Path(dtb_path).exists():
+                Path(dtb_path).unlink()
             # Log the captured output for debugging
             logger.error(f"Validation failed. stdout: {f_out.getvalue()} stderr: {f_err.getvalue()}")
-            raise ValueError(f"Invalid board configuration: {e}")
+            raise ValueError(f"Invalid board configuration: {e}") from e
         finally:
-            if os.path.exists(dtb_path):
-                os.remove(dtb_path)
+            if Path(dtb_path).exists():
+                Path(dtb_path).unlink()
 
-        if node.yaml_path and os.path.exists(node.yaml_path):
-            os.remove(node.yaml_path)
+        if node.yaml_path and Path(node.yaml_path).exists():
+            Path(node.yaml_path).unlink()
         node.yaml_path = path
 
     def flash_firmware(self, node_id: str, firmware_path: str):
         node = self.get_node(node_id)
-        if not os.path.isabs(firmware_path):
-            firmware_path = os.path.abspath(firmware_path)
-        if not os.path.exists(firmware_path):
+        if not Path(firmware_path).is_absolute():
+            firmware_path = str(Path(firmware_path).resolve())
+        if not Path(firmware_path).exists():
             raise FileNotFoundError(f"Firmware file not found: {firmware_path}")
         node.firmware_path = firmware_path
 
@@ -122,10 +122,10 @@ class NodeManager:
             raise RuntimeError(f"Node {node_id} has not been provisioned.")
 
         # Clean up any stale sockets
-        if os.path.exists(node.qmp_socket_path):
-            os.remove(node.qmp_socket_path)
-        if os.path.exists(node.uart_socket_path):
-            os.remove(node.uart_socket_path)
+        if Path(node.qmp_socket_path).exists():
+            Path(node.qmp_socket_path).unlink()
+        if Path(node.uart_socket_path).exists():
+            Path(node.uart_socket_path).unlink()
 
         cmd = [
             "bash",
@@ -155,28 +155,36 @@ class NodeManager:
 
         # Wait a bit for QEMU to create the sockets
         for _ in range(50):
-            if os.path.exists(node.qmp_socket_path) and os.path.exists(node.uart_socket_path):
+            if Path(node.qmp_socket_path).exists() and Path(node.uart_socket_path).exists():
                 break
             # Check if process exited early
-            if node.process.returncode is not None:
-                stderr = await node.process.stderr.read()
-                raise RuntimeError(f"QEMU process exited early with code {node.process.returncode}: {stderr.decode()}")
+            if node.process and node.process.returncode is not None:
+                stderr_data = b""
+                if node.process.stderr:
+                    stderr_data = await node.process.stderr.read()
+                raise RuntimeError(
+                    f"QEMU process exited early with code {node.process.returncode}: {stderr_data.decode()}"
+                )
             await asyncio.sleep(0.1)
 
-        if not os.path.exists(node.qmp_socket_path):
-            if node.process.returncode is None:
+        if not Path(node.qmp_socket_path).exists():
+            if node.process and node.process.returncode is None:
                 node.process.terminate()
-                stderr = await node.process.stderr.read()
-                raise RuntimeError(f"QEMU failed to create QMP socket for {node_id}. stderr: {stderr.decode()}")
+                stderr_data = b""
+                if node.process.stderr:
+                    stderr_data = await node.process.stderr.read()
+                raise RuntimeError(f"QEMU failed to create QMP socket for {node_id}. stderr: {stderr_data.decode()}")
             raise RuntimeError(f"QEMU failed to start or create QMP socket for {node_id}")
 
         try:
             await node.qmp_bridge.connect(node.qmp_socket_path, node.uart_socket_path)
         except Exception as e:
-            if node.process.returncode is None:
+            if node.process and node.process.returncode is None:
                 node.process.terminate()
-            stderr = await node.process.stderr.read()
-            raise RuntimeError(f"QMP connection failed: {e}. QEMU stderr: {stderr.decode()}")
+            stderr_data = b""
+            if node.process and node.process.stderr:
+                stderr_data = await node.process.stderr.read()
+            raise RuntimeError(f"QMP connection failed: {e}. QEMU stderr: {stderr_data.decode()}") from e
 
     async def stop_node(self, node_id: str):
         if node_id not in self.nodes:
@@ -186,15 +194,13 @@ class NodeManager:
             node.process.terminate()
             try:
                 await asyncio.wait_for(node.process.wait(), timeout=5.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 node.process.kill()
                 await node.process.wait()
 
         await node.qmp_bridge.close()
 
         for path in [node.qmp_socket_path, node.uart_socket_path, node.yaml_path]:
-            if path and os.path.exists(path):
-                try:
-                    os.remove(path)
-                except OSError:
-                    pass
+            if path and Path(path).exists():
+                with suppress(OSError):
+                    Path(path).unlink()

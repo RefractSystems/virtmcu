@@ -14,18 +14,20 @@ Usage:
     python3 test/phase5/test_proto.py <adapter_binary>
 """
 
-import os
 import signal
 import socket
 import subprocess
 import sys
 import tempfile
 import time
+from pathlib import Path
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-TOOLS_DIR = os.path.join(os.path.dirname(os.path.dirname(SCRIPT_DIR)), "tools")
+SCRIPT_DIR = Path(Path(__file__).resolve().parent)
+TOOLS_DIR = Path(Path(Path(SCRIPT_DIR).parent.parent)) / "tools"
 if TOOLS_DIR not in sys.path:
     sys.path.append(TOOLS_DIR)
+
+import contextlib  # noqa: E402
 
 from vproto import (  # noqa: E402
     MMIO_REQ_READ,
@@ -65,7 +67,7 @@ def send_req(sock, req_type, size, addr, data=0):
 def wait_for_socket(path, timeout=5.0):
     deadline = time.time() + timeout
     while time.time() < deadline:
-        if os.path.exists(path):
+        if Path(path).exists():
             return True
         time.sleep(0.05)
     return False
@@ -79,7 +81,7 @@ def run_tests(adapter_bin):
             proc.terminate()
             out, err = proc.communicate(timeout=2)
             raise RuntimeError(
-                f"adapter socket {sock_path} never appeared.\n" f"stdout: {out.decode()}\nstderr: {err.decode()}"
+                f"adapter socket {sock_path} never appeared.\nstdout: {out.decode()}\nstderr: {err.decode()}"
             )
 
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
@@ -191,27 +193,24 @@ def run_tests(adapter_bin):
                 print("T7 PASS: Asynchronous IRQ CLEAR")
 
             # ── T6: throughput / latency benchmark ────────────────────────────
-            N = 1000
+            N = 1000  # noqa: N806
             t0 = time.monotonic()
             for i in range(N):
                 send_req(s, MMIO_REQ_WRITE, 4, addr=0, data=i)
             t1 = time.monotonic()
             elapsed = t1 - t0
             us_per_op = (elapsed / N) * 1e6
-            print(f"T6 BENCH: {N} writes in {elapsed*1000:.1f} ms " f"({us_per_op:.1f} µs/op)")
+            print(f"T6 BENCH: {N} writes in {elapsed * 1000:.1f} ms ({us_per_op:.1f} µs/op)")
             if us_per_op > 5000:
-                failures.append(
-                    f"T6 WARN: {us_per_op:.0f} µs/op exceeds 5 ms threshold " f"— socket latency regression?"
-                )
+                failures.append(f"T6 WARN: {us_per_op:.0f} µs/op exceeds 5 ms threshold — socket latency regression?")
 
         if failures:
             print("\nFAILURES:")
             for f in failures:
                 print(" ", f)
             return False
-        else:
-            print("\nAll protocol tests PASSED")
-            return True
+        print("\nAll protocol tests PASSED")
+        return True
 
     finally:
         proc.send_signal(signal.SIGTERM)
@@ -219,10 +218,8 @@ def run_tests(adapter_bin):
             proc.wait(timeout=3)
         except subprocess.TimeoutExpired:
             proc.kill()
-        try:
-            os.unlink(sock_path)
-        except FileNotFoundError:
-            pass
+        with contextlib.suppress(FileNotFoundError):
+            Path(sock_path).unlink()
 
 
 if __name__ == "__main__":

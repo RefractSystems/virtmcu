@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-import os
 import sys
+from pathlib import Path
 
 
 def patch_file(filepath, marker, insertion, after=False):
-    with open(filepath, "r") as f:
+    with Path(filepath).open() as f:
         content = f.read()
     if insertion in content:
-        return
+        return False
     idx = content.find(marker)
     if idx == -1:
         print(f"Error: Could not find marker '{marker}' in {filepath}")
@@ -15,8 +15,9 @@ def patch_file(filepath, marker, insertion, after=False):
     if after:
         idx += len(marker)
     new_content = content[:idx] + insertion + content[idx:]
-    with open(filepath, "w") as f:
+    with Path(filepath).open("w") as f:
         f.write(new_content)
+    return True
 
 
 def main():
@@ -24,28 +25,31 @@ def main():
         print(f"Usage: {sys.argv[0]} <qemu-source-dir>")
         sys.exit(1)
 
-    qemu = os.path.abspath(sys.argv[1])
+    qemu = Path(sys.argv[1]).resolve()
 
     # 1. Hook into net_client_init
-    net_c = os.path.join(qemu, "net", "net.c")
+    net_c = Path(qemu) / "net" / "net.c"
     marker4 = "#ifdef CONFIG_AF_XDP\n        [NET_CLIENT_DRIVER_AF_XDP]    = net_init_af_xdp,\n#endif"
     insertion4 = "\n        [NET_CLIENT_DRIVER_ZENOH]     = net_init_zenoh,"
-    patch_file(net_c, marker4, insertion4, after=True)
+    if patch_file(net_c, marker4, insertion4, after=True):
+        print(f"  patched {net_c}")
 
     marker5 = "int net_init_socket(const Netdev *netdev, const char *name,"
     insertion5 = "int net_init_zenoh(const Netdev *netdev, const char *name, NetClientState *peer, Error **errp);\n"
 
-    clients_h = os.path.join(qemu, "net", "clients.h")
-    patch_file(clients_h, marker5, insertion5, after=False)
+    clients_h = Path(qemu) / "net" / "clients.h"
+    if patch_file(clients_h, marker5, insertion5, after=False):
+        print(f"  patched {clients_h}")
 
     # 2. Add zenoh.c to net/meson.build
-    meson_build = os.path.join(qemu, "net", "meson.build")
+    meson_build = Path(qemu) / "net" / "meson.build"
     marker6 = "  'checksum.c',"
     insertion6 = "\n  'zenoh.c',"
-    patch_file(meson_build, marker6, insertion6, after=True)
+    if patch_file(meson_build, marker6, insertion6, after=True):
+        print(f"  patched {meson_build}")
 
     # 7. Patch util/module.c to allow re-entrant module loads gracefully
-    module_c = os.path.join(qemu, "util", "module.c")
+    module_c = Path(qemu) / "util" / "module.c"
     marker7 = "    assert(QTAILQ_EMPTY(&dso_init_list));"
     insertion7 = """    /* assert(QTAILQ_EMPTY(&dso_init_list)); */
     if (!QTAILQ_EMPTY(&dso_init_list)) {
@@ -53,16 +57,16 @@ def main():
                    " — skipping to avoid corruption", fname);
         return false;
     }"""
-    if os.path.exists(module_c):
-        with open(module_c, "r") as f:
+    if Path(module_c).exists():
+        with Path(module_c).open() as f:
             content = f.read()
         if marker7.strip() in content:
             new_content = content.replace(marker7, insertion7)
-            with open(module_c, "w") as f:
+            with Path(module_c).open("w") as f:
                 f.write(new_content)
 
     # 6. Generate net/zenoh.c stub
-    zenoh_c = os.path.join(qemu, "net", "zenoh.c")
+    zenoh_c = Path(qemu) / "net" / "zenoh.c"
     zenoh_c_content = """#include "qemu/osdep.h"
 #include "net/net.h"
 #include "qapi/qapi-types-net.h"
@@ -90,8 +94,8 @@ int net_init_zenoh(const Netdev *netdev, const char *name, NetClientState *peer,
     return -1;
 }
 """
-    if not os.path.exists(zenoh_c):
-        with open(zenoh_c, "w") as f:
+    if not Path(zenoh_c).exists():
+        with Path(zenoh_c).open("w") as f:
             f.write(zenoh_c_content)
 
 

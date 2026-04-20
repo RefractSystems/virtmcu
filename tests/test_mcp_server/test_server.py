@@ -40,7 +40,7 @@ async def test_call_tool_provision(mock_manager_class):
             ),
         )
         res = await handler(req)
-        result = res.root.content
+        result = res.root.content  # type: ignore[union-attr]
 
         assert isinstance(result[0], TextContent)
         assert "Board provisioned" in result[0].text
@@ -65,27 +65,29 @@ async def test_call_tool_read_memory(server):
     node.qmp_bridge.execute = AsyncMock(return_value={})
 
     # Mock tempfile to control the path
-    with patch("tempfile.mkstemp", return_value=(0, "/tmp/mock_mem")):
-        with patch("os.remove"):
-            with patch(
-                "builtins.open",
-                MagicMock(
-                    side_effect=[
-                        # First open in node_manager is for some other reason?
-                        # No, server.py uses it.
-                        MagicMock(__enter__=lambda s: MagicMock(read=lambda: b"\xde\xad\xbe\xef"))
-                    ]
-                ),
-            ):
-                handler = server.request_handlers[types.CallToolRequest]
-                req = types.CallToolRequest(
-                    method="tools/call",
-                    params=types.CallToolRequestParams(
-                        name="read_memory", arguments={"node_id": node_id, "address": 0x1000, "size": 4}
-                    ),
-                )
-                res = await handler(req)
-                assert "deadbeef" in res.root.content[0].text
+    with (
+        patch("tempfile.mkstemp", return_value=(0, "/tmp/mock_mem")),
+        patch("pathlib.Path.unlink"),
+        patch(
+            "pathlib.Path.open",
+            MagicMock(
+                side_effect=[
+                    # First open in node_manager is for some other reason?
+                    # No, server.py uses it.
+                    MagicMock(__enter__=lambda s: MagicMock(read=lambda: b"\xde\xad\xbe\xef"))  # noqa: ARG005
+                ]
+            ),
+        ),
+    ):
+        handler = server.request_handlers[types.CallToolRequest]
+        req = types.CallToolRequest(
+            method="tools/call",
+            params=types.CallToolRequestParams(
+                name="read_memory", arguments={"node_id": node_id, "address": 0x1000, "size": 4}
+            ),
+        )
+        res = await handler(req)
+        assert "deadbeef" in res.root.content[0].text
 
 
 @pytest.mark.asyncio
@@ -112,7 +114,8 @@ async def test_read_resource_console(server):
 
     handler = server.request_handlers[types.ReadResourceRequest]
     req = types.ReadResourceRequest(
-        method="resources/read", params=types.ReadResourceRequestParams(uri=f"virtmcu://nodes/{node_id}/console")
+        method="resources/read",
+        params=types.ReadResourceRequestParams(uri=f"virtmcu://nodes/{node_id}/console"),  # type: ignore[arg-type]
     )
     res = await handler(req)
     assert res.root.contents[0].text == "console output"

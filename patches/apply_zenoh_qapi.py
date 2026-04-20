@@ -18,6 +18,7 @@
 
 import os
 import sys
+from pathlib import Path
 
 
 def patch_file(path, marker, insertion, guard, after=True):
@@ -27,7 +28,7 @@ def patch_file(path, marker, insertion, guard, after=True):
     *guard* is a unique substring that, if already present in the file,
     indicates the patch was already applied (idempotency check).
     """
-    with open(path) as f:
+    with Path(path).open() as f:
         content = f.read()
     if guard in content:
         return False  # already applied
@@ -38,7 +39,7 @@ def patch_file(path, marker, insertion, guard, after=True):
         content = content.replace(marker, marker + insertion, 1)
     else:
         content = content.replace(marker, insertion + marker, 1)
-    with open(path, "w") as f:
+    with Path(path).open("w") as f:
         f.write(content)
     print(f"  patched {os.path.relpath(path)}")
     return True
@@ -49,12 +50,13 @@ def main():
         print(f"Usage: {sys.argv[0]} <qemu-source-dir>")
         sys.exit(1)
 
-    qemu = os.path.abspath(sys.argv[1])
-    net_json = os.path.join(qemu, "qapi", "net.json")
-    char_json = os.path.join(qemu, "qapi", "char.json")
+    qemu = Path(sys.argv[1]).resolve()
+    net_json = Path(qemu) / "qapi" / "net.json"
+    char_json = Path(qemu) / "qapi" / "char.json"
+    qom_json = Path(qemu) / "qapi" / "qom.json"
 
-    for p in (net_json, char_json):
-        if not os.path.exists(p):
+    for p in (net_json, char_json, qom_json):
+        if not Path(p).exists():
             print(f"ERROR: {p} not found")
             sys.exit(1)
 
@@ -179,13 +181,64 @@ def main():
     # 8. Add 'zenoh' discriminator to ChardevBackend union (before 'memory')
     patch_file(
         char_json,
-        marker="            'ringbuf': 'ChardevRingbufWrapper',\n            'memory': 'ChardevRingbufWrapper'",
-        insertion="            'zenoh': 'ChardevZenohWrapper',\n            ",
+        marker="'ringbuf': 'ChardevRingbufWrapper',",
+        insertion="\n            'zenoh': 'ChardevZenohWrapper',",
         guard="'zenoh': 'ChardevZenohWrapper'",
         after=False,
     )
 
     print("apply_zenoh_qapi.py: done")
+
+    # ── qapi/qom.json ─────────────────────────────────────────────────────────
+
+    can_host_zenoh_struct = """
+##
+# @CanHostZenohProperties:
+#
+# Properties for can-host-zenoh objects.
+#
+# @node: The zenoh node ID
+# @router: The zenoh router address (optional)
+# @topic: The zenoh topic to publish/subscribe to
+#
+# @canbus: object ID of the can-bus object to connect to the host
+#     interface
+#
+# Since: 10.0
+##
+{ 'struct': 'CanHostZenohProperties',
+  'data': { 'canbus': 'str',
+            'node': 'str',
+            '*router': 'str',
+            'topic': 'str' } }
+
+"""
+    # 9. Add CanHostZenohProperties struct (before ColoCompareProperties)
+    patch_file(
+        qom_json,
+        marker="##\n# @ColoCompareProperties:",
+        insertion=can_host_zenoh_struct,
+        guard="CanHostZenohProperties",
+        after=False,
+    )
+
+    # 10. Add 'can-host-zenoh' to ObjectType enum (before colo-compare)
+    patch_file(
+        qom_json,
+        marker="    'colo-compare',",
+        insertion="    'can-host-zenoh',\n",
+        guard="'can-host-zenoh',",
+        after=False,
+    )
+
+    # 11. Add 'can-host-zenoh' discriminator to ObjectOptions (before colo-compare)
+    patch_file(
+        qom_json,
+        marker="      'colo-compare':               'ColoCompareProperties',",
+        insertion="      'can-host-zenoh':             'CanHostZenohProperties',\n",
+        guard="'can-host-zenoh':             'CanHostZenohProperties',",
+        after=False,
+    )
 
 
 if __name__ == "__main__":

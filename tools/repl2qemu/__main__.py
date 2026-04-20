@@ -1,5 +1,6 @@
 import argparse
 import sys
+from pathlib import Path
 
 from .cli_generator import generate_cli
 from .fdt_emitter import FdtEmitter, compile_dtb
@@ -16,7 +17,7 @@ def main():
     args = parser.parse_args()
 
     try:
-        with open(args.input, "r") as f:
+        with Path(args.input).open() as f:
             content = f.read()
     except FileNotFoundError:
         print(f"Error: File '{args.input}' not found.", file=sys.stderr)
@@ -30,7 +31,7 @@ def main():
     dts = emitter.generate_dts()
 
     if args.out_arch:
-        with open(args.out_arch, "w") as f:
+        with Path(args.out_arch).open("w") as f:
             f.write(emitter.arch)
 
     print(f"Compiling into '{args.out_dtb}'...")

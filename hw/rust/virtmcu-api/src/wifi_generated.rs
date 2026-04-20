@@ -19,9 +19,7 @@ pub mod virtmcu {
             type Inner = WifiHeader<'a>;
             #[inline]
             unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-                Self {
-                    _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
-                }
+                Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
             }
         }
 
@@ -62,11 +60,7 @@ pub mod virtmcu {
                 // Safety:
                 // Created from valid Table for this object
                 // which contains a valid value in this slot
-                unsafe {
-                    self._tab
-                        .get::<u64>(WifiHeader::VT_DELIVERY_VTIME_NS, Some(0))
-                        .unwrap()
-                }
+                unsafe { self._tab.get::<u64>(WifiHeader::VT_DELIVERY_VTIME_NS, Some(0)).unwrap() }
             }
             #[inline]
             pub fn size(&self) -> u32 {
@@ -80,11 +74,7 @@ pub mod virtmcu {
                 // Safety:
                 // Created from valid Table for this object
                 // which contains a valid value in this slot
-                unsafe {
-                    self._tab
-                        .get::<u16>(WifiHeader::VT_CHANNEL, Some(0))
-                        .unwrap()
-                }
+                unsafe { self._tab.get::<u16>(WifiHeader::VT_CHANNEL, Some(0)).unwrap() }
             }
             #[inline]
             pub fn rssi(&self) -> i8 {
@@ -105,11 +95,7 @@ pub mod virtmcu {
                 // Safety:
                 // Created from valid Table for this object
                 // which contains a valid value in this slot
-                unsafe {
-                    self._tab
-                        .get::<u8>(WifiHeader::VT_FRAME_TYPE, Some(0))
-                        .unwrap()
-                }
+                unsafe { self._tab.get::<u8>(WifiHeader::VT_FRAME_TYPE, Some(0)).unwrap() }
             }
         }
 
@@ -159,8 +145,7 @@ pub mod virtmcu {
         impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> WifiHeaderBuilder<'a, 'b, A> {
             #[inline]
             pub fn add_delivery_vtime_ns(&mut self, delivery_vtime_ns: u64) {
-                self.fbb_
-                    .push_slot::<u64>(WifiHeader::VT_DELIVERY_VTIME_NS, delivery_vtime_ns, 0);
+                self.fbb_.push_slot::<u64>(WifiHeader::VT_DELIVERY_VTIME_NS, delivery_vtime_ns, 0);
             }
             #[inline]
             pub fn add_size(&mut self, size: u32) {
@@ -168,8 +153,7 @@ pub mod virtmcu {
             }
             #[inline]
             pub fn add_channel(&mut self, channel: u16) {
-                self.fbb_
-                    .push_slot::<u16>(WifiHeader::VT_CHANNEL, channel, 0);
+                self.fbb_.push_slot::<u16>(WifiHeader::VT_CHANNEL, channel, 0);
             }
             #[inline]
             pub fn add_rssi(&mut self, rssi: i8) {
@@ -181,18 +165,14 @@ pub mod virtmcu {
             }
             #[inline]
             pub fn add_frame_type(&mut self, frame_type: u8) {
-                self.fbb_
-                    .push_slot::<u8>(WifiHeader::VT_FRAME_TYPE, frame_type, 0);
+                self.fbb_.push_slot::<u8>(WifiHeader::VT_FRAME_TYPE, frame_type, 0);
             }
             #[inline]
             pub fn new(
                 _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
             ) -> WifiHeaderBuilder<'a, 'b, A> {
                 let start = _fbb.start_table();
-                WifiHeaderBuilder {
-                    fbb_: _fbb,
-                    start_: start,
-                }
+                WifiHeaderBuilder { fbb_: _fbb, start_: start }
             }
             #[inline]
             pub fn finish(self) -> ::flatbuffers::WIPOffset<WifiHeader<'a>> {

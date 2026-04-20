@@ -1,7 +1,6 @@
-import os
 import subprocess
 import sys
-from typing import Dict, List, Tuple
+from pathlib import Path
 
 from .parser import ReplDevice, ReplPlatform
 
@@ -25,6 +24,8 @@ COMPAT_MAP = {
     "Network.IMX_FEC": "imx.fec",
     "Network.LAN9118": "lan9118",
     "SPI.PL022": "pl022",
+    "SPI.ZenohBridge": "zenoh-spi",
+    "SPI.Echo": "spi-echo",
 }
 
 # Devices that act as interrupt controllers
@@ -39,7 +40,7 @@ class FdtEmitter:
     def __init__(self, platform: ReplPlatform):
         self.platform = platform
         self.arch = self._detect_arch()
-        self.phandles: Dict[str, int] = {}
+        self.phandles: dict[str, int] = {}
         self.next_phandle = 1
         self._assign_phandles()
 
@@ -62,7 +63,7 @@ class FdtEmitter:
     def _get_phandle(self, name: str) -> int:
         return self.phandles.get(name, 0)
 
-    def _parse_addr(self, addr_str: str) -> Tuple[int, int]:
+    def _parse_addr(self, addr_str: str) -> tuple[int, int]:
         """Parses address string '0x60000000' or '<0x40011000, +0x100>'."""
         if not addr_str or addr_str.lower() == "none" or not any(c.isdigit() for c in addr_str):
             return 0, 0
@@ -76,11 +77,10 @@ class FdtEmitter:
                 size_part = size_part[1:]
             size = int(size_part, 16)
             return base, size
-        else:
-            try:
-                return int(addr_str, 16), 0
-            except ValueError:
-                return 0, 0
+        try:
+            return int(addr_str, 16), 0
+        except ValueError:
+            return 0, 0
 
     def generate_dts(self) -> str:
         lines = []
@@ -137,7 +137,7 @@ class FdtEmitter:
         lines.append("")
 
         # Pre-process children
-        children_by_parent = {}
+        children_by_parent: dict[str, list[ReplDevice]] = {}
         for dev in self.platform.devices:
             if dev.parent:
                 if dev.parent not in children_by_parent:
@@ -154,10 +154,10 @@ class FdtEmitter:
         return "\n".join(lines)
 
     def _emit_device(
-        self, dev: ReplDevice, children_by_parent: Dict[str, List[ReplDevice]], indent: str = "    "
-    ) -> List[str]:
+        self, dev: ReplDevice, children_by_parent: dict[str, list[ReplDevice]], indent: str = "    "
+    ) -> list[str]:
         lines = []
-        base, size = self._parse_addr(dev.address_str)
+        base, size = self._parse_addr(dev.address_str or "0x0")
 
         if dev.type_name == "Memory.MappedMemory":
             if "size" in dev.properties:
@@ -249,16 +249,16 @@ class FdtEmitter:
 
         for k, v in dev.properties.items():
             if k in ["size", "cpuType", "isa", "mmu-type", "chardev"]:
-                if k == "size" and compat_str == "mmio-socket-bridge":
+                if k == "size" and compat_str == "mmio-socket-bridge" and "region-size" not in dev.properties:
                     # Backward compatibility: map 'size' to 'region-size'
-                    if "region-size" not in dev.properties:
-                        val = v if isinstance(v, int) else int(v, 16)
-                        lines.append(f"{indent}    region-size = <0x{val:x}>;")
+                    val = v if isinstance(v, int) else int(v, 16)
+                    lines.append(f"{indent}    region-size = <0x{val:x}>;")
                 continue
             if k == "address" and compat_str == "mmio-socket-bridge":
                 # Backward compatibility: map 'address' to 'base-addr'
                 if "base-addr" not in dev.properties:
-                    v_hi, v_lo = (v >> 32) & 0xFFFFFFFF, v & 0xFFFFFFFF
+                    val = v if isinstance(v, int) else int(v, 16)
+                    v_hi, v_lo = (val >> 32) & 0xFFFFFFFF, val & 0xFFFFFFFF
                     lines.append(f"{indent}    base-addr = <0x{v_hi:x} 0x{v_lo:x}>;")
                 continue
 
@@ -266,6 +266,9 @@ class FdtEmitter:
             if k == "base-addr" and isinstance(v, int):
                 v_hi, v_lo = (v >> 32) & 0xFFFFFFFF, v & 0xFFFFFFFF
                 lines.append(f"{indent}    {k} = <0x{v_hi:x} 0x{v_lo:x}>;")
+            elif k.lower() == "macaddress" or k.lower() == "macaddr" or k.lower() == "mac":
+                # Ensure MAC is output as a string named 'macaddr' for QEMU's qdev_prop_macaddr
+                lines.append(f'{indent}    macaddr = "{v}";')
             elif isinstance(v, bool):
                 if v:
                     lines.append(f"{indent}    {k};")
@@ -274,7 +277,8 @@ class FdtEmitter:
             else:
                 lines.append(f'{indent}    {k} = "{v}";')
 
-        if not dev.parent:
+        # Only add container for memory regions, or if explicitly requested (not for standard SysBus devices)
+        if not dev.parent and dev.type_name == "Memory.MappedMemory":
             lines.append(f"{indent}    container = <{self._get_phandle('qemu_sysmem')}>;")
 
         # Emit children
@@ -290,7 +294,7 @@ def compile_dtb(dts_content: str, out_path: str) -> bool:
     """Compiles the DTS string into a DTB file using dtc."""
     dts_path = out_path + ".dts"
     try:
-        with open(dts_path, "w") as f:
+        with Path(dts_path).open("w") as f:
             f.write(dts_content)
         subprocess.run(["dtc", "-I", "dts", "-O", "dtb", "-o", out_path, dts_path], check=True, capture_output=True)
         return True
@@ -298,5 +302,5 @@ def compile_dtb(dts_content: str, out_path: str) -> bool:
         print(f"Error compiling DTB: {e.stderr.decode()}", file=sys.stderr)
         return False
     finally:
-        if os.path.exists(dts_path):
-            os.unlink(dts_path)
+        if Path(dts_path).exists():
+            Path(dts_path).unlink()

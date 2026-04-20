@@ -1,5 +1,8 @@
 # CLAUDE.md — virtmcu Project Context
 
+> [!IMPORTANT]
+> **ENTERPRISE QUALITY MANDATE**: All agents (Claude, Gemini, etc.) must produce only enterprise-grade code. No "AI-style" shortcuts, no suppressed lints (`#[allow]`, `noqa`, `// @ts-ignore`), and no bypassing the type system. Every change must be surgically precise, idiomatically perfect, and backed by empirical test evidence.
+
 This file is read automatically by Claude Code and Gemini CLI at session start
 (\`GEMINI.md\` is a symlink to this file — maintain only this one).
 Update it when architectural decisions change or new constraints are discovered.
@@ -128,6 +131,7 @@ We adhere to a strict **Bifurcated Testing Strategy** to maximize performance, s
 | **Thin CI Wrappers** | **Bash** | `make test` / `.sh` | Entry points *only*. Bash scripts must never manage multi-process orchestration. They should merely be 2-3 line scripts that invoke `pytest` or `cargo test`. |
 
 **Mandates:**
+- **Parallel Test Execution:** Our test suites run in parallel (using `pytest -n auto`). All tests MUST be designed to be isolated and idempotent. Avoid hardcoded ports, fixed UNIX socket paths, or shared global state that could cause interference between concurrent test runs.
 - Never write complex setup/teardown loops in Bash. If a test requires booting QEMU alongside a background process (e.g., `zenoh_coordinator`), it **must** be written in Python using `pytest` fixtures to ensure safe teardown and prevent zombie processes.
 - Internal logic (like CSMA/CA backoffs, flatbuffer serialization, struct alignment) **must** be tested natively in Rust using `#[test]`, bypassing QEMU boot entirely where possible.
 
@@ -170,12 +174,26 @@ To ensure the highest level of professional software engineering, all agents MUS
 - **Observability:** Ensure critical paths (sim loop, clock sync) have appropriate logging (not in hot loop), error reporting, and health checks.
 - **Documentation:** Update READMEs, ADRs, and API docs as the architecture evolves.
 
-### 6. Protected Files
+### 6. Protected Files & Centralized Scripts
 - **DO NOT** automatically edit `.env` or `VERSIONS` files. These files contain specific version pins and local secrets (via symlinking) that should only be modified by the user or dedicated synchronization scripts (e.g., `make sync-versions`).
+- **QEMU Patching:** All modifications to QEMU source files, C-level hooks, or SysBus definitions MUST be centralized in `scripts/apply-qemu-patches.sh`. Do not duplicate `sed` commands or `git am` calls across Dockerfiles or bare-metal setup scripts.
+
+### 7. Environment Parity (1:1 Local-to-Remote Sync)
+- **Mandate:** Local CI simulations (`make ci-local`) MUST exactly mirror the GitHub Actions environment. Tests and lints must be executed *inside* the isolated Docker container (`ghcr.io/refractsystems/virtmcu/devenv-base:dev-amd64`), never directly on the host machine.
+- **Why:** This strict 1:1 parity prevents "Works on My Machine" bugs caused by host toolchain drift (e.g., a missing `cargo-audit` or `hadolint` version mismatch).
+- **Reference:** For details on the CI architecture, caching strategies, and the `devenv-base` vs `devenv` split, consult `docs/CI_GUIDE.md`. Whenever modifying CI pipelines or `Makefile` targets, you must maintain this strict 1:1 synchronization constraint.
+
+### 8. Enterprise-Ready Quality (No Quality Regression)
+- **Mandate:** Agents are NEVER allowed to lower the quality, strictness, or coverage of lints, static analyzers, type-checkers, or security gates without explicit human written consent.
+- **YOLO Mode Constraint:** Even when running in `--yolo` mode, agents can only *increase* software quality and enterprise-readiness on their own (e.g., by enabling stricter rules or fixing technical debt). They must never suppress warnings, disable lints (`#[allow(...)]`, `noqa`, etc.), or bypass the type system to resolve errors unless specifically instructed to do so for a verified edge case.
 
 ---
 
 ## Common Pitfalls & Troubleshooting
+
+### Parallel Test Interference
+Since tests run in parallel, "random" failures are often caused by resource contention (e.g., two tests trying to bind to the same Zenoh port or UNIX socket).
+- **The Fix**: Use dynamic port allocation or unique identifiers for socket paths. Check if a failure is reproducible when running the test in isolation (`pytest tests/test_foo.py`) vs. the full suite.
 
 ### Stale Simulation Processes (Multiple QEMU Instances)
 During development, you may encounter "stale" or orphaned QEMU or Zenoh processes. These processes can hold onto ports, UNIX sockets, or CPU resources, causing subsequent runs to fail with "Address already in use" or mysterious timeouts.
@@ -218,7 +236,19 @@ To ensure CI remains green and Rust code follows project standards, you MUST run
 make lint     # Runs ruff, version checks, and cargo clippy (fails loudly)
 ```
 
-**Pre-commit Hook**: A git `pre-commit` hook is installed that runs `make lint` automatically. If it fails, the commit will be blocked. Fix all lint/clippy errors before attempting to commit again.
+### Git Hooks (Automation)
+The project uses Git hooks to automatically run \`make lint\` on both \`commit\` and \`push\`.
+
+- **Installation**:
+  - **Devcontainer**: Hooks are installed automatically on container creation.
+  - **Manual**: Run \`make install-hooks\` to set them up in your local \`.git/hooks\` directory.
+- **Bypassing**: If you must commit/push without running lints (e.g., for a work-in-progress commit that you know is messy), use the \`--no-verify\` flag:
+  \`\`\`bash
+  git commit -m "wip: messy change" --no-verify
+  git push --no-verify
+  \`\`\`
+
+**Pre-commit Hook**: A git \`pre-commit\` hook is installed that runs \`make lint\` automatically. If it fails, the commit will be blocked. Fix all lint/clippy errors before attempting to commit again.
 
 ---
 

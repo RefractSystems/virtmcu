@@ -1,0 +1,29 @@
+name: Miri Undefined Behavior Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-miri-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-miri:
+    name: Test with Miri
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust Nightly with Miri
+        run: |
+          rustup toolchain install nightly --profile minimal --component miri
+          rustup default nightly
+
+      - name: Run cargo miri test
+        run: |
+          cd hw/rust
+          cargo miri setup
+          MIRIFLAGS="-Zmiri-disable-isolation" cargo miri test

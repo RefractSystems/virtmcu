@@ -14,23 +14,24 @@ Regression thresholds (PLAN §16.5):
     MIPS regression:     > 5 %  compared to baseline → fail
     P99 latency increase: > 10 % compared to baseline → fail
 """
+
 import argparse
 import json
-import os
 import sys
+from pathlib import Path
 
-WORKSPACE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+WORKSPACE = Path(__file__).resolve().parent.parent
 
-RESULTS_PATH  = os.path.join(WORKSPACE, "test", "phase16", "last_results.json")
-BASELINE_PATH = os.path.join(WORKSPACE, "test", "phase16", "baseline.json")
+RESULTS_PATH = Path(WORKSPACE) / "test" / "phase16" / "last_results.json"
+BASELINE_PATH = Path(WORKSPACE) / "test" / "phase16" / "baseline.json"
 
 # Regression thresholds.
-MIPS_REGRESSION_PCT = 5.0   # fail if MIPS drops by more than this percentage
-P99_REGRESSION_PCT  = 10.0  # fail if P99 latency increases by more than this percentage
+MIPS_REGRESSION_PCT = 5.0  # fail if MIPS drops by more than this percentage
+P99_REGRESSION_PCT = 10.0  # fail if P99 latency increases by more than this percentage
 
 
 def load_json(path: str) -> list[dict]:
-    with open(path) as f:
+    with Path(path).open() as f:
         return json.load(f)
 
 
@@ -52,7 +53,7 @@ def check_regression(baseline: list[dict], current: list[dict]) -> list[str]:
     failures = []
 
     baseline_mips = extract_mips(baseline)
-    current_mips  = extract_mips(current)
+    current_mips = extract_mips(current)
 
     for mode, base_val in baseline_mips.items():
         if mode not in current_mips:
@@ -67,11 +68,11 @@ def check_regression(baseline: list[dict], current: list[dict]) -> list[str]:
                 )
 
     base_lat = extract_latency(baseline)
-    cur_lat  = extract_latency(current)
+    cur_lat = extract_latency(current)
 
     if base_lat and cur_lat:
         base_p99 = base_lat.get("p99_us", 0)
-        cur_p99  = cur_lat.get("p99_us", 0)
+        cur_p99 = cur_lat.get("p99_us", 0)
         if base_p99 > 0:
             increase_pct = (cur_p99 - base_p99) / base_p99 * 100
             if increase_pct > P99_REGRESSION_PCT:
@@ -111,19 +112,19 @@ def print_comparison(baseline: list[dict], current: list[dict]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[1])
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--save-baseline", action="store_true",
-                       help="Copy last_results.json → baseline.json")
-    group.add_argument("--check", action="store_true",
-                       help="Compare current results against baseline; exit 1 on regression")
-    group.add_argument("--show", action="store_true",
-                       help="Print baseline vs current side-by-side")
+    group.add_argument("--save-baseline", action="store_true", help="Copy last_results.json → baseline.json")
+    group.add_argument(
+        "--check", action="store_true", help="Compare current results against baseline; exit 1 on regression"
+    )
+    group.add_argument("--show", action="store_true", help="Print baseline vs current side-by-side")
     args = parser.parse_args()
 
     if args.save_baseline:
-        if not os.path.exists(RESULTS_PATH):
+        if not Path(RESULTS_PATH).exists():
             print(f"ERROR: {RESULTS_PATH} not found — run bench.py first", file=sys.stderr)
             sys.exit(1)
         import shutil
+
         shutil.copy2(RESULTS_PATH, BASELINE_PATH)
         current = load_json(RESULTS_PATH)
         print(f"Baseline saved to {BASELINE_PATH}")
@@ -132,18 +133,20 @@ def main() -> None:
             print(f"  {mode}: {val:.1f} MIPS")
         lat = extract_latency(current)
         if lat:
-            print(f"  P50={lat.get('p50_us',0):.0f} µs  P99={lat.get('p99_us',0):.0f} µs  stalls={lat.get('stalls',0)}")
+            print(
+                f"  P50={lat.get('p50_us', 0):.0f} µs  P99={lat.get('p99_us', 0):.0f} µs  stalls={lat.get('stalls', 0)}"
+            )
         return
 
-    if not os.path.exists(BASELINE_PATH):
+    if not Path(BASELINE_PATH).exists():
         print(f"ERROR: {BASELINE_PATH} not found — run with --save-baseline first", file=sys.stderr)
         sys.exit(1)
-    if not os.path.exists(RESULTS_PATH):
+    if not Path(RESULTS_PATH).exists():
         print(f"ERROR: {RESULTS_PATH} not found — run bench.py first", file=sys.stderr)
         sys.exit(1)
 
     baseline = load_json(BASELINE_PATH)
-    current  = load_json(RESULTS_PATH)
+    current = load_json(RESULTS_PATH)
 
     if args.show:
         print_comparison(baseline, current)

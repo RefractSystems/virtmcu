@@ -1,11 +1,15 @@
 [package]
 name = "virtmcu-api"
+publish = false
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
+
+[lints] 
+workspace = true 
 
 [dependencies]
 flatbuffers.workspace = true
 
 [dev-dependencies]
-proptest = "1.0"
+proptest = "1.4.0"

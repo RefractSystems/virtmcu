@@ -1,0 +1,15 @@
+namespace virtmcu.lin;
+
+enum LinMessageType : uint8 {
+    Data = 0,
+    Break = 1,
+    Sync = 2,
+}
+
+table LinFrame {
+    delivery_vtime_ns: uint64;
+    type: LinMessageType = Data;
+    data: [uint8];
+}
+
+root_type LinFrame;

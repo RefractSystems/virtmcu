@@ -1,11 +1,12 @@
-import os
 import socket
 import struct
 import sys
+from pathlib import Path
 
 # From virtmcu_proto.h
 VIRTMCU_PROTO_MAGIC = 0x564D4355
 VIRTMCU_PROTO_VERSION = 1
+
 
 def main():
     if len(sys.argv) < 3:
@@ -16,8 +17,8 @@ def main():
     sock_path = sys.argv[1]
     mode = sys.argv[2]
 
-    if os.path.exists(sock_path):
-        os.remove(sock_path)
+    if Path(sock_path).exists():
+        Path(sock_path).unlink()
 
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     server.bind(sock_path)
@@ -69,6 +70,7 @@ def main():
 
     conn.close()
     server.close()
+
 
 if __name__ == "__main__":
     main()

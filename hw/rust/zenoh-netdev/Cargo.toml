@@ -1,5 +1,6 @@
 [package]
 name = "zenoh-netdev"
+publish = false
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -7,11 +8,12 @@ authors.workspace = true
 [lib]
 crate-type = ["staticlib"]
 
+[lints] 
+workspace = true 
+
 [dependencies]
 virtmcu-api.workspace = true
 zenoh.workspace = true
 virtmcu-qom.workspace = true
 virtmcu-zenoh.workspace = true
-libc.workspace = true
 crossbeam-channel.workspace = true
-byteorder.workspace = true

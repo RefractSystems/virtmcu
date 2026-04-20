@@ -1,0 +1,96 @@
+name: ASan Integration Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-asan-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  BUILDER_IMAGE: virtmcu-builder
+  PYTHON_VERSION: "3.13"
+  # CI runners can be slow; raise the zenoh-clock STALL timeout
+  VIRTMCU_STALL_TIMEOUT_MS: "300000"
+
+jobs:
+  changes:
+    name: Check for source changes
+    runs-on: ubuntu-latest
+    outputs:
+      expensive: ${{ steps.filter.outputs.expensive }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            expensive:
+              - '!(**/*.md)'
+              - '!(docs/**)'
+              - '!(.github/**)'
+              - '.github/workflows/ci-asan.yml'
+
+  test-asan:
+    name: Test ASan (amd64)
+    needs: [changes]
+    if: needs.changes.outputs.expensive == 'true' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Load VERSIONS
+        run: grep -E -v '^#|^$' VERSIONS >> "$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build local devenv-base image
+        uses: docker/bake-action@v7
+        env:
+          ARCH: amd64
+        with:
+          targets: devenv-base
+          load: true
+          set: |
+            *.cache-from=type=gha,scope=virtmcu-amd64
+            *.cache-to=type=gha,scope=virtmcu-amd64,mode=max
+
+      - name: Fix workspace permissions
+        run: sudo chown -R 1000:1000 .
+
+      - name: Cache ASan build
+        uses: actions/cache@v4
+        with:
+          path: third_party
+          key: asan-${{ runner.os }}-${{ hashFiles('scripts/setup-qemu.sh', 'scripts/apply-qemu-patches.sh', 'patches/**', 'VERSIONS') }}
+          restore-keys: |
+            asan-${{ runner.os }}-
+
+      - name: Build QEMU and run tests under ASan
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            -e USER=vscode \
+            -e VIRTMCU_STALL_TIMEOUT_MS=${{ env.VIRTMCU_STALL_TIMEOUT_MS }} \
+            ghcr.io/refractsystems/virtmcu/devenv-base:dev-amd64 \
+            make test-asan
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: asan-test-logs
+          path: |
+            test-results/
+            test/*/results/
+            **/*.log
+
+      - name: Restore workspace permissions
+        if: always()
+        run: sudo chown -R runner:docker .

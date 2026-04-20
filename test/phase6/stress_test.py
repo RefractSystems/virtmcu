@@ -1,3 +1,4 @@
+import os
 import struct
 import threading
 import time
@@ -13,8 +14,15 @@ def node_thread(node_id, num_messages, session):
         pub.put(struct.pack("<QI", vtime, len(payload)) + payload)
         # time.sleep(0.001)
 
+
 def main():
     conf = zenoh.Config()
+
+    router = os.environ.get("ZENOH_ROUTER")
+    if router:
+        conf.insert_json5("mode", '"client"')
+        conf.insert_json5("connect/endpoints", f'["{router}"]')
+
     s = zenoh.open(conf)
 
     num_nodes = 20
@@ -45,6 +53,7 @@ def main():
     time.sleep(2)
     s.close()
     print("Stress test finished.")
+
 
 if __name__ == "__main__":
     main()

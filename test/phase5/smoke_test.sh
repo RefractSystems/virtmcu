@@ -226,7 +226,7 @@ run_test_case() {
     if ! python3 -c '
 import socket, sys, json
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-s.settimeout(2.0)
+s.settimeout(5.0)
 try:
     s.connect(sys.argv[1])
     s.recv(4096)
@@ -234,8 +234,12 @@ try:
     s.recv(4096)
     s.sendall(b"{\"execute\": \"query-status\"}\n")
     data = s.recv(4096).decode("utf-8")
-    if "return" not in data: sys.exit(1)
-except Exception:
+    if "return" not in data:
+        print("Missing return", file=sys.stderr)
+        sys.exit(1)
+except Exception as e:
+    import traceback
+    traceback.print_exc()
     sys.exit(1)
 sys.exit(0)
 ' "$QMP_SOCK"; then
@@ -270,7 +274,7 @@ sys.exit(0)
 }
 
 # TEST 1: HANG (Timeout)
-if ! run_test_case "hang" "mmio-socket-bridge: timeout on socket fd"; then
+if ! run_test_case "hang" "mmio-socket-bridge: timeout on socket"; then
     exit 1
 fi
 

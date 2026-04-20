@@ -1,11 +1,15 @@
 [package]
 name = "zenoh-802154"
+publish = false
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 
 [lib]
 crate-type = ["staticlib"]
+
+[lints] 
+workspace = true 
 
 [dependencies]
 zenoh.workspace = true

@@ -1,12 +1,12 @@
-import os
 import sys
+from pathlib import Path
 
 import flatbuffers
 
 # Add tools/telemetry_fbs to sys.path so we can import the generated flatbuffers code
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-WORKSPACE_DIR = os.path.dirname(SCRIPT_DIR)
-sys.path.append(os.path.join(WORKSPACE_DIR, "tools", "telemetry_fbs"))
+SCRIPT_DIR = Path(Path(__file__).resolve().parent)
+WORKSPACE_DIR = Path(SCRIPT_DIR).parent
+sys.path.append(str(Path(WORKSPACE_DIR) / "tools" / "telemetry_fbs"))
 
 from Virtmcu.Telemetry import TraceEvent as TraceEventBuilder  # noqa: E402
 from Virtmcu.Telemetry.TraceEvent import TraceEvent  # noqa: E402

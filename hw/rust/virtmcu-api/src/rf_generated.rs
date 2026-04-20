@@ -24,7 +24,7 @@ extern crate alloc;
 use flatbuffers::FlatBufferBuilder;
 
 pub mod rf_header {
-    use super::*;
+    use super::FlatBufferBuilder;
 
     /// VTable slot offsets for RfHeader fields.
     pub const VT_DELIVERY_VTIME_NS: flatbuffers::VOffsetT = 4;
@@ -44,9 +44,7 @@ pub mod rf_header {
         type Inner = RfHeader<'a>;
         #[inline]
         unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-            RfHeader {
-                _tab: unsafe { flatbuffers::Table::new(buf, loc) },
-            }
+            RfHeader { _tab: unsafe { flatbuffers::Table::new(buf, loc) } }
         }
     }
 
@@ -107,10 +105,7 @@ pub mod rf_header {
         #[inline]
         pub fn new(fbb: &'b mut FlatBufferBuilder<'a>) -> Self {
             let start = fbb.start_table();
-            RfHeaderBuilder {
-                fbb_: fbb,
-                start_: start,
-            }
+            RfHeaderBuilder { fbb_: fbb, start_: start }
         }
 
         #[inline]
@@ -136,8 +131,10 @@ pub mod rf_header {
     /// Parse the first `RfHeader` from a size-prefixed FlatBuffer slice.
     /// Returns `None` if the buffer is too short or otherwise malformed.
     pub fn decode(buf: &[u8]) -> Option<(u64, u32, i8, u8)> {
-        let hdr = flatbuffers::size_prefixed_root::<RfHeader>(buf).ok()?;
-        Some((hdr.delivery_vtime_ns(), hdr.size(), hdr.rssi(), hdr.lqi()))
+        match flatbuffers::size_prefixed_root::<RfHeader>(buf) {
+            Ok(hdr) => Some((hdr.delivery_vtime_ns(), hdr.size(), hdr.rssi(), hdr.lqi())),
+            Err(_) => None,
+        }
     }
 
     impl flatbuffers::Verifiable for RfHeader<'_> {
@@ -177,7 +174,7 @@ mod tests {
         let lqi: u8 = 200;
 
         let buf = rf_header::encode(vtime, size, rssi, lqi);
-        let (v2, s2, r2, l2) = rf_header::decode(&buf).expect("decode failed");
+        let (v2, s2, r2, l2) = rf_header::decode(&buf).unwrap_or_else(|| std::process::abort()); // "decode failed");
 
         assert_eq!(v2, vtime);
         assert_eq!(s2, size);
@@ -191,7 +188,7 @@ mod tests {
         // elided (FlatBuffers stores defaults as absent).  The reader must
         // return 255 regardless.
         let buf = rf_header::encode(0, 0, 0, 255);
-        let (_, _, _, lqi) = rf_header::decode(&buf).expect("decode failed");
+        let (_, _, _, lqi) = rf_header::decode(&buf).unwrap_or_else(|| std::process::abort()); // "decode failed");
         assert_eq!(lqi, 255, "absent lqi field should return default 255");
     }
 

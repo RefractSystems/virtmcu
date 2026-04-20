@@ -29,6 +29,7 @@ qemu-build/
 qemu-install/
 
 # Test artifacts
+last_results.json
 *.xml
 output/
 log.html
@@ -59,7 +60,10 @@ qmp-timeout*
 third_party/
 
 target/
+.cargo-cache/
 tools/zenoh_coordinator/target/
 hw/rust-dummy/target/
 hw/rust-dummy/Cargo.lock
 test-results/
+\n# Compiled test binaries\nprint_rust_sizes\nprint_sizes
+.venv-docker/

@@ -5,6 +5,7 @@ import struct
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import zenoh
 
@@ -12,8 +13,8 @@ import zenoh
 def main():
     print("[Test] Starting Zenoh control verification...")
 
-    workspace_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-    router_script = os.path.join(workspace_dir, "tests", "zenoh_router_persistent.py")
+    workspace_dir = Path(__file__).resolve().parent.parent.parent
+    router_script = Path(workspace_dir) / "tests" / "zenoh_router_persistent.py"
 
     # 1. Start Zenoh router
     print("[Test] Starting Zenoh router...")
@@ -45,12 +46,12 @@ def main():
     session.declare_subscriber("firmware/control/0/**", on_sample)
 
     # 2. Run QEMU
-    script_dir = os.path.dirname(os.path.realpath(__file__))
-    workspace_dir = os.path.dirname(os.path.dirname(script_dir))
-    run_sh = os.path.join(workspace_dir, "scripts", "run.sh")
+    script_dir = Path(os.path.realpath(__file__)).parent
+    workspace_dir = Path(Path(script_dir).parent.parent)
+    run_sh = Path(workspace_dir) / "scripts" / "run.sh"
 
-    dtb = os.path.join(script_dir, "board.dtb")
-    kernel = os.path.join(script_dir, "actuator.elf")
+    dtb = Path(script_dir) / "board.dtb"
+    kernel = Path(script_dir) / "actuator.elf"
 
     cmd = [
         run_sh,
@@ -67,7 +68,7 @@ def main():
         # Actually, if we don't provide -device zenoh-clock, it runs standalone.
     ]
 
-    print(f"[Test] Running: {' '.join(cmd)}")
+    print(f"[Test] Running: {' '.join(map(str, cmd))}")
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, preexec_fn=os.setsid)
 
     # 3. Wait for output and messages
@@ -79,6 +80,11 @@ def main():
 
     try:
         while time.time() - start_time < timeout:
+            if proc.poll() is not None:
+                print(f"[QEMU] Process exited unexpectedly with code {proc.returncode}")
+                break
+
+            # Non-blocking read would be better, but for this simple test, we just rely on timeout
             line = proc.stdout.readline()
             if line:
                 print(f"[QEMU] {line.strip()}")
@@ -95,21 +101,24 @@ def main():
         print(f"[Test] Exception: {e}")
     finally:
         # Kill QEMU
-        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-        proc.wait()
+        if proc.poll() is None:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                proc.wait(timeout=5)
+            except Exception:
+                pass
 
         # Kill router
-        router_proc.terminate()
-        router_proc.wait()
+        if router_proc.poll() is None:
+            router_proc.terminate()
+            router_proc.wait(timeout=5)
 
     # 4. Verify results
     for msg in received_msgs:
-        if msg["topic"] == "firmware/control/0/42":
-            if abs(msg["vals"][0] - 3.14) < 0.001:
-                success_1 = True
-        elif msg["topic"] == "firmware/control/0/99":
-            if len(msg["vals"]) == 3 and msg["vals"] == (1.0, 2.0, 3.0):
-                success_2 = True
+        if msg["topic"] == "firmware/control/0/42" and abs(msg["vals"][0] - 3.14) < 0.001:
+            success_1 = True
+        elif msg["topic"] == "firmware/control/0/99" and len(msg["vals"]) == 3 and msg["vals"] == (1.0, 2.0, 3.0):
+            success_2 = True
 
     if success_1 and success_2:
         print("[Test] SUCCESS: All control signals verified.")

@@ -171,11 +171,11 @@ fi
 
 if [ -n "$FOUND_SO" ]; then
     QEMU_MODULE_DIR=$(dirname "$FOUND_SO")
-elif [ -d "$QEMU_DIR/build-virtmcu/install/lib/qemu" ]; then
+elif [ -d "$QEMU_DIR/build-virtmcu/install/lib/qemu" ] && ls "$QEMU_DIR/build-virtmcu/install/lib/qemu"/hw-virtmcu-*.so >/dev/null 2>&1; then
     QEMU_MODULE_DIR="$QEMU_DIR/build-virtmcu/install/lib/qemu"
-elif [ -d "/opt/virtmcu/lib/aarch64-linux-gnu/qemu" ]; then
+elif [ -d "/opt/virtmcu/lib/aarch64-linux-gnu/qemu" ] && ls /opt/virtmcu/lib/aarch64-linux-gnu/qemu/hw-virtmcu-*.so >/dev/null 2>&1; then
     QEMU_MODULE_DIR="/opt/virtmcu/lib/aarch64-linux-gnu/qemu"
-elif [ -d "/opt/virtmcu/lib/x86_64-linux-gnu/qemu" ]; then
+elif [ -d "/opt/virtmcu/lib/x86_64-linux-gnu/qemu" ] && ls /opt/virtmcu/lib/x86_64-linux-gnu/qemu/hw-virtmcu-*.so >/dev/null 2>&1; then
     QEMU_MODULE_DIR="/opt/virtmcu/lib/x86_64-linux-gnu/qemu"
 elif [ -d "/opt/virtmcu/lib/qemu" ]; then
     QEMU_MODULE_DIR="/opt/virtmcu/lib/qemu"

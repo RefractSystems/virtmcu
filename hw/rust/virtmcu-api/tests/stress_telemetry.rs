@@ -7,17 +7,14 @@ use virtmcu_api::{
 #[test]
 fn test_stress_telemetry_serialization() {
     let mut builder = FlatBufferBuilder::new();
-    let num_events = 100_000;
+    let num_events = if cfg!(miri) { 100 } else { 100_000 };
 
     let start = Instant::now();
     for i in 0..num_events {
         builder.reset();
 
-        let device_name = if i % 2 == 0 {
-            Some(builder.create_string(&format!("device_{}", i)))
-        } else {
-            None
-        };
+        let device_name =
+            if i % 2 == 0 { Some(builder.create_string(&format!("device_{i}"))) } else { None };
 
         let args = telemetry_fb::TraceEventArgs {
             timestamp_ns: i as u64 * 1000,
@@ -31,14 +28,12 @@ fn test_stress_telemetry_serialization() {
         builder.finish(root, None);
 
         let payload = builder.finished_data();
-        let parsed_event = flatbuffers::root::<GenTraceEvent>(payload).expect("Failed to parse");
+        let parsed_event =
+            flatbuffers::root::<GenTraceEvent>(payload).unwrap_or_else(|_| std::process::abort()); // "Failed to parse");
 
         assert_eq!(parsed_event.timestamp_ns(), i as u64 * 1000);
         assert_eq!(parsed_event.id(), i as u32);
     }
     let duration = start.elapsed();
-    println!(
-        "Serialized and deserialized {} events in {:?}",
-        num_events, duration
-    );
+    println!("Serialized and deserialized {num_events} events in {duration:?}");
 }

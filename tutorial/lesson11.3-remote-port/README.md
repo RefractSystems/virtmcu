@@ -65,7 +65,7 @@ bql_unlock();
 
 /* 3. Send the request, then sleep on the condition variable.
  *    qemu_cond_wait atomically releases sock_mutex and suspends.  */
-writen(s->sock_fd, req, req_len);
+written(s->sock_fd, req, req_len);
 while (!s->has_resp) {
     qemu_cond_wait(&s->resp_cond, &s->sock_mutex);
 }

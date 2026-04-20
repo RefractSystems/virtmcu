@@ -1,6 +1,6 @@
-import os
 import socket
 import sys
+from pathlib import Path
 
 from tools.vproto import (
     SIZE_MMIO_REQ,
@@ -12,9 +12,9 @@ from tools.vproto import (
     VirtmcuHandshake,
 )
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SCRIPT_DIR = Path(Path(__file__).resolve().parent)
 if SCRIPT_DIR not in sys.path:
-    sys.path.append(SCRIPT_DIR)
+    sys.path.append(str(SCRIPT_DIR))
 
 
 def recvall(conn, n):
@@ -28,8 +28,8 @@ def recvall(conn, n):
 
 
 def start_server(sock_path):
-    if os.path.exists(sock_path):
-        os.unlink(sock_path)
+    if Path(sock_path).exists():
+        Path(sock_path).unlink()
 
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     server.bind(sock_path)

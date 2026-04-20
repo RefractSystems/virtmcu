@@ -21,10 +21,7 @@ fn test_firmware_studio_struct_sizes() {
 #[test]
 fn test_firmware_studio_handshake() {
     // Firmware Studio needs to send a handshake on socket connection
-    let handshake = VirtmcuHandshake {
-        magic: VIRTMCU_PROTO_MAGIC,
-        version: VIRTMCU_PROTO_VERSION,
-    };
+    let handshake = VirtmcuHandshake { magic: VIRTMCU_PROTO_MAGIC, version: VIRTMCU_PROTO_VERSION };
 
     // Convert to bytes as if sending over a socket
     let bytes: [u8; 8] = unsafe { std::mem::transmute(handshake) };
@@ -61,7 +58,7 @@ fn test_firmware_studio_telemetry_consumption() {
     // THIS IS WHAT FIRMWARE STUDIO WILL DO:
     // They will receive `payload` from Zenoh and parse it using the generated FlatBuffer code.
     let parsed_event =
-        flatbuffers::root::<GenTraceEvent>(payload).expect("Failed to parse flatbuffer");
+        flatbuffers::root::<GenTraceEvent>(payload).unwrap_or_else(|_| std::process::abort()); // "Failed to parse flatbuffer");
 
     assert_eq!(parsed_event.timestamp_ns(), 1_234_567_890);
     assert_eq!(parsed_event.id(), 42);
@@ -88,7 +85,7 @@ fn test_telemetry_consumption_no_device_name() {
     let payload = builder.finished_data();
 
     let parsed_event =
-        flatbuffers::root::<GenTraceEvent>(payload).expect("Failed to parse flatbuffer");
+        flatbuffers::root::<GenTraceEvent>(payload).unwrap_or_else(|_| std::process::abort()); // "Failed to parse flatbuffer");
 
     assert_eq!(parsed_event.timestamp_ns(), 987_654_321);
     assert_eq!(parsed_event.id(), 10);

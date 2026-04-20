@@ -1,0 +1,12 @@
+namespace virtmcu.flexray;
+
+table FlexRayFrame {
+  delivery_vtime_ns: uint64;
+  frame_id: uint16;
+  cycle_count: uint8;
+  channel: uint8; // 0=A, 1=B
+  flags: uint16;  // bit 0: startup, bit 1: sync, bit 2: null, bit 3: preamble
+  data: [uint8];
+}
+
+root_type FlexRayFrame;

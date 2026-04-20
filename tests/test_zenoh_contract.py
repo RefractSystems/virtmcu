@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+from pathlib import Path
 
 
 def get_python_zenoh_version():
@@ -19,18 +20,18 @@ def get_python_zenoh_version():
             return None
 
 
-def get_libzenohc_version(lib_path):
+def get_libzenohc_version(lib_path):  # noqa: ARG001
     """
     Extracts the expected zenoh-c version.
     Since the binary no longer reliably embeds its version, we read it
     from the VERSIONS file in the workspace root.
     """
     # Find VERSIONS file relative to this script
-    workspace_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    versions_file = os.path.join(workspace_dir, "VERSIONS")
+    workspace_dir = Path(Path(Path(__file__).parent.resolve().parent))
+    versions_file = Path(workspace_dir) / "VERSIONS"
 
-    if os.path.exists(versions_file):
-        with open(versions_file, "r") as f:
+    if Path(versions_file).exists():
+        with Path(versions_file).open() as f:
             for line in f:
                 if line.startswith("ZENOH_VERSION="):
                     return line.strip().split("=")[1]

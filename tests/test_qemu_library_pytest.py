@@ -1,5 +1,5 @@
-import os
 import time
+from pathlib import Path
 
 import pytest
 
@@ -18,13 +18,13 @@ def test_qemu_library_launch_and_close():
         # Use a minimal DTB for launching
         dtb = "test/phase1/minimal.dtb"
         kernel = "test/phase1/hello.elf"
-        if not os.path.exists(dtb):
+        if not Path(dtb).exists():
             pytest.skip("Minimal DTB not found")
 
         qmp_sock, uart_sock = lib.launch_qemu(dtb, kernel_path=kernel, extra_args=["-S"])
 
-        assert os.path.exists(qmp_sock)
-        assert os.path.exists(uart_sock)
+        assert Path(qmp_sock).exists()
+        assert Path(uart_sock).exists()
 
         lib.connect_to_qemu(qmp_sock, uart_sock)
         lib.start_emulation()
@@ -45,7 +45,7 @@ def test_qemu_library_pc_assertion():
     try:
         dtb = "test/phase1/minimal.dtb"
         kernel = "test/phase1/hello.elf"
-        if not os.path.exists(dtb):
+        if not Path(dtb).exists():
             pytest.skip("Minimal DTB not found")
 
         qmp_sock, uart_sock = lib.launch_qemu(dtb, kernel_path=kernel, extra_args=["-S"])
@@ -72,7 +72,7 @@ def test_qemu_library_uart_wait_fail():
     try:
         dtb = "test/phase1/minimal.dtb"
         kernel = "test/phase1/hello.elf"
-        if not os.path.exists(dtb):
+        if not Path(dtb).exists():
             pytest.skip("Minimal DTB not found")
 
         qmp_sock, uart_sock = lib.launch_qemu(dtb, kernel_path=kernel, extra_args=["-S"])

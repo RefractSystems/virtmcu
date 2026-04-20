@@ -8,7 +8,7 @@ echo "[soak] Phase 7 Soak Test - 1 hour determinism test (mocked for CI)"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 echo "Executing determinism loop..."
-for i in {1..5}; do
+for _ in {1..5}; do
     bash "$SCRIPT_DIR/determinism_test.sh"
 done
 echo "Soak test completed successfully."

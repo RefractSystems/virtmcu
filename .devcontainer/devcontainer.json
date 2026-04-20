@@ -1,6 +1,5 @@
 {
   "name": "virtmcu",
-  "image": "ghcr.io/refractsystems/virtmcu/devenv:latest",
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
   "initializeCommand": "bash .devcontainer/initialize.sh",
   "features": {
@@ -13,12 +12,11 @@
   "mounts": [
     "source=${localEnv:HOME}/.claude,target=/home/vscode/.claude,type=bind",
     "source=${localEnv:HOME}/.claude.json,target=/home/vscode/.claude.json,type=bind",
-    "source=${localEnv:HOME}/.gemini,target=/home/vscode/.gemini,type=bind",
     "source=${localEnv:HOME}/.config/gh,target=/home/vscode/.config/gh,type=bind"
   ],
   "workspaceFolder": "/workspace",
   "remoteUser": "vscode",
-  "postCreateCommand": "git config --global --add safe.directory /workspace && uv sync && rustup component add clippy rustfmt rust-analyzer && echo '[ -f /workspace/.venv/bin/activate ] && source /workspace/.venv/bin/activate' >> ~/.zshrc && echo 'set -a; [ -f /workspace/.env ] && source /workspace/.env; set +a' >> ~/.zshrc && echo \"alias gemini='gemini --yolo'\" >> ~/.zshrc",
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
   "customizations": {
     "vscode": {
       "settings": {
@@ -36,5 +34,6 @@
         "timonwong.shellcheck"
       ]
     }
-  }
+  },
+  "image": "ghcr.io/refractsystems/virtmcu/devenv:latest"
 }

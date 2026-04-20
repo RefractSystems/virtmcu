@@ -1,15 +1,15 @@
 import json
-import os
 import socket
 import sys
 import threading
 import time
 import traceback
+from pathlib import Path
 
 import zenoh
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-TOOLS_DIR = os.path.join(os.path.dirname(os.path.dirname(SCRIPT_DIR)), "tools")
+SCRIPT_DIR = Path(Path(__file__).resolve().parent)
+TOOLS_DIR = Path(Path(Path(SCRIPT_DIR).parent.parent)) / "tools"
 if TOOLS_DIR not in sys.path:
     sys.path.append(TOOLS_DIR)
 
@@ -19,6 +19,7 @@ QMP_SOCK = sys.argv[1]
 TOPIC = "sim/clock/advance/0"
 TIMEOUT_S = 10.0
 QMP_TIMEOUT_S = 2.0
+
 
 class QmpThread(threading.Thread):
     def __init__(self, sock_path):
@@ -31,7 +32,7 @@ class QmpThread(threading.Thread):
         try:
             sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             sock.connect(self.sock_path)
-            f = sock.makefile('rw')
+            f = sock.makefile("rw")
 
             # Read greeting
             greeting = f.readline()
@@ -41,7 +42,7 @@ class QmpThread(threading.Thread):
             # Send qmp_capabilities
             f.write(json.dumps({"execute": "qmp_capabilities"}) + "\n")
             f.flush()
-            f.readline() # Read response
+            f.readline()  # Read response
 
             while self.running:
                 start_time = time.time()
@@ -63,9 +64,11 @@ class QmpThread(threading.Thread):
             self.error = str(e)
             traceback.print_exc()
 
+
 def pack_req(delta_ns):
     req = ClockAdvanceReq(delta_ns=delta_ns, mujoco_time_ns=0)
     return req.pack()
+
 
 def send_query(session, delta_ns, label):
     replies = list(session.get(TOPIC, payload=pack_req(delta_ns), timeout=TIMEOUT_S))
@@ -82,6 +85,7 @@ def send_query(session, delta_ns, label):
         raise Exception(f"{label}: Reply error_code = {resp.error_code} (1=STALL, 2=ZENOH_ERROR)")
 
     return True
+
 
 def main():
     qmp_thread = QmpThread(QMP_SOCK)
@@ -101,9 +105,9 @@ def main():
                 print(f"FAIL: QMP Thread Error: {qmp_thread.error}", file=sys.stderr)
                 sys.exit(1)
 
-            print(f"Sending clock advance {i+1}...")
-            send_query(session, 1_000_000, f"Q{i+1}")
-            print(f"Clock advance {i+1} OK")
+            print(f"Sending clock advance {i + 1}...")
+            send_query(session, 1_000_000, f"Q{i + 1}")
+            print(f"Clock advance {i + 1} OK")
 
     finally:
         qmp_thread.running = False
@@ -115,6 +119,7 @@ def main():
         sys.exit(1)
 
     print("PASS")
+
 
 if __name__ == "__main__":
     main()

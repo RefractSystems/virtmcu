@@ -1,4 +1,4 @@
-import os
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -24,16 +24,16 @@ async def test_provision_board(node_manager):
     await node_manager.provision_board(node_id, config)
     node = node_manager.get_node(node_id)
     assert node.yaml_path is not None
-    assert os.path.exists(node.yaml_path)
-    with open(node.yaml_path, "r") as f:
+    assert Path(node.yaml_path).exists()
+    with Path(node.yaml_path).open() as f:
         assert f.read() == config
-    os.remove(node.yaml_path)
+    Path(node.yaml_path).unlink()
 
 
 def test_flash_firmware(node_manager):
     node_id = "test_node"
     # Create a dummy file
-    with open("/tmp/dummy.elf", "w") as f:
+    with Path("/tmp/dummy.elf").open("w") as f:
         f.write("dummy")
 
     node_manager.flash_firmware(node_id, "/tmp/dummy.elf")
@@ -43,7 +43,7 @@ def test_flash_firmware(node_manager):
     with pytest.raises(FileNotFoundError):
         node_manager.flash_firmware(node_id, "/tmp/nonexistent.elf")
 
-    os.remove("/tmp/dummy.elf")
+    Path("/tmp/dummy.elf").unlink()
 
 
 @pytest.mark.asyncio

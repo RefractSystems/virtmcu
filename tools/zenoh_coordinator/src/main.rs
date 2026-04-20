@@ -32,6 +32,10 @@ struct Args {
     #[arg(short, long, default_value_t = 1_000_000)]
     delay_ns: u64,
 
+    /// Zenoh router to connect to
+    #[arg(short, long)]
+    connect: Option<String>,
+
     /// Seed for the deterministic PRNG used for packet dropping
     #[arg(short, long, default_value_t = 42)]
     seed: u64,
@@ -51,17 +55,22 @@ struct Args {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-struct LinkUpdate {
+struct TopologyUpdate {
     from: String,
     to: String,
     delay_ns: Option<u64>,
     drop_probability: Option<f64>,
+    jitter_ns: Option<u64>,
+    enable_collisions: Option<bool>,
 }
 
 struct LinkState {
     delay_ns: u64,
     drop_probability: f64,
+    jitter_ns: u64,
+    enable_collisions: bool,
 }
+
 
 /// Node position sourced from physics engine via sim/telemetry/position.
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -170,17 +179,55 @@ fn world_to_cell(x: f64, y: f64, z: f64) -> CellKey {
     )
 }
 
+/// Helper to parse a topic and extract the world prefix, base topic (excluding node/tx), and node ID.
+/// World prefix is everything before "sim/..." or "virtmcu/...".
+fn parse_topic_with_prefix(topic: &str) -> Option<(String, String, String)> {
+    let parts: Vec<&str> = topic.split('/').collect();
+    
+    // Explicitly ignore FlexRay topics to avoid interference
+    if topic.contains("sim/flexray") {
+        return None;
+    }
+
+    // Find where the protocol path starts
+    let mut protocol_start = None;
+    for (i, part) in parts.iter().enumerate() {
+        if *part == "sim" || *part == "virtmcu" {
+            protocol_start = Some(i);
+            break;
+        }
+    }
+
+    let world_prefix = if let Some(idx) = protocol_start {
+        parts[..idx].join("/")
+    } else {
+        String::new()
+    };
+
+    let (base_topic, node_id) = if topic.ends_with("/tx") && parts.len() >= 2 {
+        let nid = parts[parts.len() - 2].to_string();
+        let base = parts[..parts.len() - 2].join("/");
+        (base, nid)
+    } else {
+        (topic.to_string(), String::new())
+    };
+
+    Some((world_prefix, base_topic, node_id))
+}
+
 /// Spatial grid: cell → list of node IDs.
 struct SpatialGrid {
     cells: HashMap<CellKey, Vec<String>>,
 }
 
 impl SpatialGrid {
-    fn build(positions: &HashMap<String, NodeInfo>) -> Self {
+    fn build(positions: &HashMap<(String, String), NodeInfo>, prefix: &str) -> Self {
         let mut cells: HashMap<CellKey, Vec<String>> = HashMap::new();
-        for info in positions.values() {
-            let key = world_to_cell(info.x, info.y, info.z);
-            cells.entry(key).or_default().push(info.id.clone());
+        for ((p, id), info) in positions {
+            if p == prefix {
+                let key = world_to_cell(info.x, info.y, info.z);
+                cells.entry(key).or_default().push(id.clone());
+            }
         }
         SpatialGrid { cells }
     }
@@ -229,60 +276,68 @@ async fn main() {
         Vec::new()
     };
 
-    let session = zenoh::open(Config::default()).await.unwrap();
+    let mut config = Config::default();
+    if let Some(ref connect) = args.connect {
+        config.insert_json5("connect/endpoints", &format!("[\"{}\"]", connect)).unwrap();
+    }
+    let session = zenoh::open(config).await.unwrap();
 
-    // Subscribe to all TX topics
+    // Subscribe to all TX topics using protocol-specific patterns
     let eth_sub = session
-        .declare_subscriber("sim/eth/frame/*/tx")
+        .declare_subscriber("**/sim/eth/frame/**/tx")
         .await
         .unwrap();
     let uart_sub = session
-        .declare_subscriber("virtmcu/uart/*/tx")
+        .declare_subscriber("**/virtmcu/uart/**/tx")
         .await
         .unwrap();
     let sysc_sub = session
-        .declare_subscriber("sim/systemc/frame/*/tx")
+        .declare_subscriber("**/sim/systemc/frame/**/tx")
         .await
         .unwrap();
     let rf_802154_sub = session
-        .declare_subscriber("sim/rf/802154/*/tx")
+        .declare_subscriber("**/sim/rf/802154/**/tx")
         .await
         .unwrap();
     let rf_hci_sub = session
-        .declare_subscriber("sim/rf/hci/*/tx")
+        .declare_subscriber("**/sim/rf/hci/**/tx")
+        .await
+        .unwrap();
+    let lin_sub = session
+        .declare_subscriber("**/sim/lin/**/tx")
         .await
         .unwrap();
 
     // Subscribe to topology control updates
     let ctrl_sub = session
-        .declare_subscriber("sim/network/control")
+        .declare_subscriber("**/sim/network/control")
         .await
         .unwrap();
 
     // Subscribe to dynamic position updates from the physics engine (MuJoCo).
-    // Format: JSON {"id":"0","x":1.0,"y":2.0,"z":3.0} published at physics rate (~1 kHz).
-    // Protected by RwLock: read lock during RF routing, write lock only during updates.
     let pos_sub = session
-        .declare_subscriber("sim/telemetry/position")
+        .declare_subscriber("**/sim/telemetry/position")
         .await
         .unwrap();
 
-    // Track active nodes dynamically based on who transmits
-    let mut known_eth_nodes = HashSet::new();
-    let mut known_uart_nodes = HashSet::new();
-    let mut known_sysc_nodes = HashSet::new();
-    let mut known_rf_nodes = HashSet::new();
+    // Track active nodes dynamically based on base_topic (isolation per protocol and world_prefix)
+    let mut known_eth_nodes: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut known_uart_nodes: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut known_sysc_nodes: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut known_rf_nodes: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut known_lin_nodes: HashMap<String, HashSet<String>> = HashMap::new();
 
-    // Link properties: (from, to) -> LinkState
-    let mut topology: HashMap<(String, String), LinkState> = HashMap::new();
+    // Link properties: (world_prefix, from, to) -> LinkState
+    let mut topology: HashMap<(String, String, String), LinkState> = HashMap::new();
 
     // Node positions: dynamically updated via sim/telemetry/position.
-    // Seed with default positions; physics engine updates will override these.
-    let node_positions: Arc<RwLock<HashMap<String, NodeInfo>>> = {
+    // Keyed by (world_prefix, node_id)
+    let node_positions: Arc<RwLock<HashMap<(String, String), NodeInfo>>> = {
         let mut m = HashMap::new();
-        m.insert("0".to_string(), NodeInfo { id: "0".to_string(), x: 0.0, y: 0.0, z: 0.0 });
-        m.insert("1".to_string(), NodeInfo { id: "1".to_string(), x: 10.0, y: 0.0, z: 0.0 });
-        m.insert("2".to_string(), NodeInfo { id: "2".to_string(), x: 100.0, y: 0.0, z: 0.0 });
+        // Default positions for prefix-less nodes (backward compatibility)
+        m.insert(("".to_string(), "0".to_string()), NodeInfo { id: "0".to_string(), x: 0.0, y: 0.0, z: 0.0 });
+        m.insert(("".to_string(), "1".to_string()), NodeInfo { id: "1".to_string(), x: 10.0, y: 0.0, z: 0.0 });
+        m.insert(("".to_string(), "2".to_string()), NodeInfo { id: "2".to_string(), x: 100.0, y: 0.0, z: 0.0 });
         Arc::new(RwLock::new(m))
     };
 
@@ -305,46 +360,55 @@ async fn main() {
             Ok(sample) = rf_802154_sub.recv_async() => {
                 let positions = node_positions.read().await;
                 let _ = handle_rf_msg(&session, sample, &mut known_rf_nodes, RfCtx {
-                    topic_prefix: "sim/rf/802154", positions: &positions,
+                    _topic_prefix: "sim/rf/802154", positions: &positions,
                     args: &args, has_rf_header: true, obstacles: &obstacles,
                 }).await;
             }
             Ok(sample) = rf_hci_sub.recv_async() => {
                 let positions = node_positions.read().await;
                 let _ = handle_rf_msg(&session, sample, &mut known_rf_nodes, RfCtx {
-                    topic_prefix: "sim/rf/hci", positions: &positions,
+                    _topic_prefix: "sim/rf/hci", positions: &positions,
                     args: &args, has_rf_header: false, obstacles: &obstacles,
                 }).await;
             }
+            Ok(sample) = lin_sub.recv_async() => {
+                let _ = handle_lin_msg(&session, sample, &mut known_lin_nodes, &topology, args.delay_ns).await;
+            }
             Ok(sample) = ctrl_sub.recv_async() => {
-                let payload_bytes = sample.payload().to_bytes();
-                if let Ok(payload_str) = std::str::from_utf8(&payload_bytes) {
-                    if let Ok(update) = serde_json::from_str::<LinkUpdate>(payload_str) {
-                        let state = topology.entry((update.from.clone(), update.to.clone())).or_insert(LinkState {
-                            delay_ns: args.delay_ns,
-                            drop_probability: 0.0,
-                        });
-                        if let Some(d) = update.delay_ns { state.delay_ns = d; }
-                        if let Some(p) = update.drop_probability { state.drop_probability = p; }
-                        println!("Topology Update: {} -> {} (delay: {} ns, drop: {})",
-                                 update.from, update.to, state.delay_ns, state.drop_probability);
+                let topic = sample.key_expr().as_str();
+                if let Some((prefix, _, _)) = parse_topic_with_prefix(topic) {
+                    let payload_bytes = sample.payload().to_bytes();
+                    if let Ok(payload_str) = std::str::from_utf8(&payload_bytes) {
+                        if let Ok(update) = serde_json::from_str::<TopologyUpdate>(payload_str) {
+                            let state = topology.entry((prefix.clone(), update.from.clone(), update.to.clone())).or_insert(LinkState {
+                                delay_ns: args.delay_ns,
+                                drop_probability: 0.0,
+                                jitter_ns: 0,
+                                enable_collisions: false,
+                            });
+                            if let Some(d) = update.delay_ns { state.delay_ns = d; }
+                            if let Some(p) = update.drop_probability { state.drop_probability = p; }
+                            if let Some(j) = update.jitter_ns { state.jitter_ns = j; }
+                            if let Some(c) = update.enable_collisions { state.enable_collisions = c; }
+                        }
                     }
                 }
             }
             Ok(sample) = pos_sub.recv_async() => {
-                let payload_bytes = sample.payload().to_bytes();
-                if let Ok(payload_str) = std::str::from_utf8(&payload_bytes) {
-                    if let Ok(update) = serde_json::from_str::<PositionUpdate>(payload_str) {
-                        let mut positions = node_positions.write().await;
-                        let entry = positions.entry(update.id.clone()).or_insert(NodeInfo {
-                            id: update.id.clone(),
-                            x: 0.0, y: 0.0, z: 0.0,
-                        });
-                        entry.x = update.x;
-                        entry.y = update.y;
-                        entry.z = update.z;
-                        println!("Position Update: node={} x={:.2} y={:.2} z={:.2}",
-                                 update.id, update.x, update.y, update.z);
+                let topic = sample.key_expr().as_str();
+                if let Some((prefix, _, _)) = parse_topic_with_prefix(topic) {
+                    let payload_bytes = sample.payload().to_bytes();
+                    if let Ok(payload_str) = std::str::from_utf8(&payload_bytes) {
+                        if let Ok(update) = serde_json::from_str::<PositionUpdate>(payload_str) {
+                            let mut positions = node_positions.write().await;
+                            let entry = positions.entry((prefix.clone(), update.id.clone())).or_insert(NodeInfo {
+                                id: update.id.clone(),
+                                x: 0.0, y: 0.0, z: 0.0,
+                            });
+                            entry.x = update.x;
+                            entry.y = update.y;
+                            entry.z = update.z;
+                        }
                     }
                 }
             }
@@ -355,18 +419,18 @@ async fn main() {
 async fn handle_eth_msg(
     session: &zenoh::Session,
     sample: zenoh::sample::Sample,
-    known_nodes: &mut HashSet<String>,
-    topology: &HashMap<(String, String), LinkState>,
+    known_nodes: &mut HashMap<String, HashSet<String>>,
+    topology: &HashMap<(String, String, String), LinkState>,
     default_delay_ns: u64,
     rng: &mut ChaCha8Rng,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let topic = sample.key_expr().as_str();
-    let parts: Vec<&str> = topic.split('/').collect();
-    if parts.len() != 5 {
-        return Ok(());
-    }
-    let sender_id = parts[3].to_string();
-    known_nodes.insert(sender_id.clone());
+    let (world_prefix, base_topic, sender_id) = match parse_topic_with_prefix(topic) {
+        Some(res) => res,
+        None => return Ok(()),
+    };
+    
+    known_nodes.entry(base_topic.clone()).or_default().insert(sender_id.clone());
 
     let payload = sample.payload().to_bytes();
     if payload.len() < 12 {
@@ -384,33 +448,41 @@ async fn handle_eth_msg(
         return Ok(());
     }
 
-    // Broadcast to all known nodes except the sender
-    for node in known_nodes.iter() {
-        if node == &sender_id {
-            continue;
+    // Broadcast to all known nodes within the SAME base_topic except the sender
+    if let Some(nodes) = known_nodes.get(&base_topic) {
+        for node in nodes.iter() {
+            if node == &sender_id {
+                continue;
+            }
+
+            let (delay_ns, drop_prob, jitter_ns, _enable_collisions) =
+                if let Some(state) = topology.get(&(world_prefix.clone(), sender_id.clone(), node.clone())) {
+                    (state.delay_ns, state.drop_probability, state.jitter_ns, state.enable_collisions)
+                } else {
+                    (default_delay_ns, 0.0, 0, false)
+                };
+
+            // Apply deterministic packet drop
+            if drop_prob > 0.0 && rng.gen::<f64>() < drop_prob {
+                continue;
+            }
+
+            let mut actual_delay = delay_ns;
+            if jitter_ns > 0 {
+                // Apply jitter
+                actual_delay = actual_delay.saturating_add(rng.gen_range(0..=jitter_ns));
+            }
+
+            let new_delivery_vtime_ns = delivery_vtime_ns.saturating_add(actual_delay);
+
+            let mut new_payload = Vec::with_capacity(payload.len());
+            new_payload.write_u64::<LittleEndian>(new_delivery_vtime_ns)?;
+            new_payload.write_u32::<LittleEndian>(size)?;
+            new_payload.write_all(&payload[12..])?;
+
+            let rx_topic = format!("{}/{}/rx", base_topic, node);
+            let _ = session.put(&rx_topic, new_payload).await;
         }
-
-        let (delay_ns, drop_prob) =
-            if let Some(state) = topology.get(&(sender_id.clone(), node.clone())) {
-                (state.delay_ns, state.drop_probability)
-            } else {
-                (default_delay_ns, 0.0)
-            };
-
-        // Apply deterministic packet drop
-        if drop_prob > 0.0 && rng.gen::<f64>() < drop_prob {
-            continue;
-        }
-
-        let new_delivery_vtime_ns = delivery_vtime_ns.saturating_add(delay_ns);
-
-        let mut new_payload = Vec::with_capacity(payload.len());
-        new_payload.write_u64::<LittleEndian>(new_delivery_vtime_ns)?;
-        new_payload.write_u32::<LittleEndian>(size)?;
-        new_payload.write_all(&payload[12..])?;
-
-        let rx_topic = format!("sim/eth/frame/{}/rx", node);
-        let _ = session.put(&rx_topic, new_payload).await;
     }
     Ok(())
 }
@@ -418,20 +490,21 @@ async fn handle_eth_msg(
 async fn handle_uart_msg(
     session: &zenoh::Session,
     sample: zenoh::sample::Sample,
-    known_nodes: &mut HashSet<String>,
-    topology: &HashMap<(String, String), LinkState>,
+    known_nodes: &mut HashMap<String, HashSet<String>>,
+    topology: &HashMap<(String, String, String), LinkState>,
     default_delay_ns: u64,
     rng: &mut ChaCha8Rng,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let topic = sample.key_expr().as_str();
-    let parts: Vec<&str> = topic.split('/').collect();
-    if parts.len() != 4 {
-        return Ok(());
-    }
-    let sender_id = parts[2].to_string();
-    known_nodes.insert(sender_id.clone());
+    let (world_prefix, base_topic, sender_id) = match parse_topic_with_prefix(topic) {
+        Some(res) => res,
+        None => return Ok(()),
+    };
+    
+    known_nodes.entry(base_topic.clone()).or_default().insert(sender_id.clone());
 
     let payload = sample.payload().to_bytes();
+
     if payload.len() < 12 {
         return Ok(());
     }
@@ -444,33 +517,98 @@ async fn handle_uart_msg(
         return Ok(());
     }
 
-    // Broadcast to all known nodes except the sender
-    for node in known_nodes.iter() {
-        if node == &sender_id {
-            continue;
-        }
+    // Broadcast to all known nodes within the SAME base_topic except the sender
+    if let Some(nodes) = known_nodes.get(&base_topic) {
+        for node in nodes.iter() {
+            if node == &sender_id {
+                continue;
+            }
 
-        let (delay_ns, drop_prob) =
-            if let Some(state) = topology.get(&(sender_id.clone(), node.clone())) {
-                (state.delay_ns, state.drop_probability)
+            let (delay_ns, drop_prob, jitter_ns, _enable_collisions) =
+                if let Some(state) = topology.get(&(world_prefix.clone(), sender_id.clone(), node.clone())) {
+                    (state.delay_ns, state.drop_probability, state.jitter_ns, state.enable_collisions)
+                } else {
+                    (default_delay_ns, 0.0, 0, false)
+                };
+
+            // Apply deterministic packet drop
+            if drop_prob > 0.0 && rng.gen::<f64>() < drop_prob {
+                continue;
+            }
+
+            let mut actual_delay = delay_ns;
+            if jitter_ns > 0 {
+                // Apply jitter
+                actual_delay = actual_delay.saturating_add(rng.gen_range(0..=jitter_ns));
+            }
+
+            let new_delivery_vtime_ns = delivery_vtime_ns.saturating_add(actual_delay);
+
+            let mut new_payload = Vec::with_capacity(payload.len());
+            new_payload.write_u64::<LittleEndian>(new_delivery_vtime_ns)?;
+            new_payload.write_u32::<LittleEndian>(size)?;
+            new_payload.write_all(&payload[12..])?;
+
+            let rx_topic = format!("{}/{}/rx", base_topic, node);
+            let _ = session.put(&rx_topic, new_payload).await;
+        }
+    }
+    Ok(())
+}
+
+async fn handle_lin_msg(
+    session: &zenoh::Session,
+    sample: zenoh::sample::Sample,
+    known_nodes: &mut HashMap<String, HashSet<String>>,
+    topology: &HashMap<(String, String, String), LinkState>,
+    default_delay_ns: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let topic = sample.key_expr().as_str();
+    let (world_prefix, base_topic, sender_id) = match parse_topic_with_prefix(topic) {
+        Some(res) => res,
+        None => return Ok(()),
+    };
+    
+    known_nodes.entry(base_topic.clone()).or_default().insert(sender_id.clone());
+
+    let payload = sample.payload().to_bytes();
+    let frame = match virtmcu_api::lin_generated::virtmcu::lin::root_as_lin_frame(&payload) {
+        Ok(f) => f,
+        Err(_) => return Ok(()),
+    };
+
+    let delivery_vtime_ns = frame.delivery_vtime_ns();
+
+    if let Some(nodes) = known_nodes.get(&base_topic) {
+        for node in nodes.iter() {
+            if node == &sender_id {
+                continue;
+            }
+
+            let delay_ns = if let Some(state) = topology.get(&(world_prefix.clone(), sender_id.clone(), node.clone())) {
+                state.delay_ns
             } else {
-                (default_delay_ns, 0.0)
+                default_delay_ns
             };
 
-        // Apply deterministic packet drop
-        if drop_prob > 0.0 && rng.gen::<f64>() < drop_prob {
-            continue;
+            let new_vtime = delivery_vtime_ns.saturating_add(delay_ns);
+
+            let mut fbb = flatbuffers::FlatBufferBuilder::new();
+            let data_offset = frame.data().map(|d| fbb.create_vector(d.bytes()));
+            
+            let args = virtmcu_api::lin_generated::virtmcu::lin::LinFrameArgs {
+                delivery_vtime_ns: new_vtime,
+                type_: frame.type_(),
+                data: data_offset,
+            };
+            
+            let new_frame = virtmcu_api::lin_generated::virtmcu::lin::LinFrame::create(&mut fbb, &args);
+            fbb.finish(new_frame, None);
+            let finished_data = fbb.finished_data().to_vec();
+
+            let rx_topic = format!("{}/{}/rx", base_topic, node);
+            let _ = session.put(&rx_topic, finished_data).await;
         }
-
-        let new_delivery_vtime_ns = delivery_vtime_ns.saturating_add(delay_ns);
-
-        let mut new_payload = Vec::with_capacity(payload.len());
-        new_payload.write_u64::<LittleEndian>(new_delivery_vtime_ns)?;
-        new_payload.write_u32::<LittleEndian>(size)?;
-        new_payload.write_all(&payload[12..])?;
-
-        let rx_topic = format!("virtmcu/uart/{}/rx", node);
-        let _ = session.put(&rx_topic, new_payload).await;
     }
     Ok(())
 }
@@ -478,17 +616,17 @@ async fn handle_uart_msg(
 async fn handle_sysc_msg(
     session: &zenoh::Session,
     sample: zenoh::sample::Sample,
-    known_nodes: &mut HashSet<String>,
-    topology: &HashMap<(String, String), LinkState>,
+    known_nodes: &mut HashMap<String, HashSet<String>>,
+    topology: &HashMap<(String, String, String), LinkState>,
     default_delay_ns: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let topic = sample.key_expr().as_str();
-    let parts: Vec<&str> = topic.split('/').collect();
-    if parts.len() != 5 {
-        return Ok(());
-    }
-    let sender_id = parts[3].to_string();
-    known_nodes.insert(sender_id.clone());
+    let (world_prefix, base_topic, sender_id) = match parse_topic_with_prefix(topic) {
+        Some(res) => res,
+        None => return Ok(()),
+    };
+    
+    known_nodes.entry(base_topic.clone()).or_default().insert(sender_id.clone());
 
     let payload = sample.payload().to_bytes();
     if payload.len() < 12 {
@@ -503,35 +641,37 @@ async fn handle_sysc_msg(
         return Ok(());
     }
 
-    // Broadcast to all known nodes except the sender
-    for node in known_nodes.iter() {
-        if node == &sender_id {
-            continue;
+    // Broadcast to all known nodes within the SAME base_topic except the sender
+    if let Some(nodes) = known_nodes.get(&base_topic) {
+        for node in nodes.iter() {
+            if node == &sender_id {
+                continue;
+            }
+
+            let delay_ns = if let Some(state) = topology.get(&(world_prefix.clone(), sender_id.clone(), node.clone())) {
+                state.delay_ns
+            } else {
+                default_delay_ns
+            };
+
+            let new_delivery_vtime_ns = delivery_vtime_ns.saturating_add(delay_ns);
+
+            let mut new_payload = Vec::with_capacity(payload.len());
+            new_payload.write_u64::<LittleEndian>(new_delivery_vtime_ns)?;
+            new_payload.write_u32::<LittleEndian>(size)?;
+            new_payload.write_all(&payload[12..])?;
+
+            let rx_topic = format!("{}/{}/rx", base_topic, node);
+            let _ = session.put(&rx_topic, new_payload).await;
         }
-
-        let delay_ns = if let Some(state) = topology.get(&(sender_id.clone(), node.clone())) {
-            state.delay_ns
-        } else {
-            default_delay_ns
-        };
-
-        let new_delivery_vtime_ns = delivery_vtime_ns.saturating_add(delay_ns);
-
-        let mut new_payload = Vec::with_capacity(payload.len());
-        new_payload.write_u64::<LittleEndian>(new_delivery_vtime_ns)?;
-        new_payload.write_u32::<LittleEndian>(size)?;
-        new_payload.write_all(&payload[12..])?;
-
-        let rx_topic = format!("sim/systemc/frame/{}/rx", node);
-        let _ = session.put(&rx_topic, new_payload).await;
     }
     Ok(())
 }
 
 /// Read-only RF routing context passed into `handle_rf_msg`.
 struct RfCtx<'a> {
-    topic_prefix: &'a str,
-    positions: &'a HashMap<String, NodeInfo>,
+    _topic_prefix: &'a str,
+    positions: &'a HashMap<(String, String), NodeInfo>,
     args: &'a Args,
     has_rf_header: bool,
     obstacles: &'a [ObstacleBox],
@@ -540,14 +680,17 @@ struct RfCtx<'a> {
 async fn handle_rf_msg(
     session: &zenoh::Session,
     sample: zenoh::sample::Sample,
-    known_nodes: &mut HashSet<String>,
+    known_nodes: &mut HashMap<String, HashSet<String>>,
     ctx: RfCtx<'_>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let RfCtx { topic_prefix, positions, args, has_rf_header, obstacles } = ctx;
+    let RfCtx { _topic_prefix: _, positions, args, has_rf_header, obstacles } = ctx;
     let topic = sample.key_expr().as_str();
-    let parts: Vec<&str> = topic.split('/').collect();
-    let sender_id = parts[parts.len() - 2].to_string();
-    known_nodes.insert(sender_id.clone());
+    let (world_prefix, base_topic, sender_id) = match parse_topic_with_prefix(topic) {
+        Some(res) => res,
+        None => return Ok(()),
+    };
+    
+    known_nodes.entry(base_topic.clone()).or_default().insert(sender_id.clone());
 
     let payload = sample.payload().to_bytes();
 
@@ -583,18 +726,21 @@ async fn handle_rf_msg(
     }
     let frame_data = &payload[payload_offset..payload_offset + size as usize];
 
-    let sender_pos = positions.get(&sender_id);
+    let sender_pos = positions.get(&(world_prefix.clone(), sender_id.clone()));
 
     // Spatial index: only check nodes in adjacent grid cells (Phase 14.6).
     let candidate_ids: Vec<String> = if let Some(spos) = sender_pos {
-        let grid = SpatialGrid::build(positions);
+        let grid = SpatialGrid::build(positions, &world_prefix);
         grid.candidates(spos.x, spos.y, spos.z, &sender_id)
     } else {
-        known_nodes.iter().filter(|id| *id != &sender_id).cloned().collect()
+        match known_nodes.get(&base_topic) {
+            Some(nodes) => nodes.iter().filter(|id| *id != &sender_id).cloned().collect(),
+            None => Vec::new(),
+        }
     };
 
     for receiver_id in &candidate_ids {
-        let receiver_pos = positions.get(receiver_id);
+        let receiver_pos = positions.get(&(world_prefix.clone(), receiver_id.clone()));
 
         let mut rssi_f = args.tx_power;
         let mut extra_delay_ns = args.delay_ns;
@@ -638,7 +784,7 @@ async fn handle_rf_msg(
             buf
         };
 
-        let rx_topic = format!("{}/{}/rx", topic_prefix, receiver_id);
+        let rx_topic = format!("{}/{}/rx", base_topic, receiver_id);
         let _ = session.put(&rx_topic, new_payload).await;
     }
     Ok(())

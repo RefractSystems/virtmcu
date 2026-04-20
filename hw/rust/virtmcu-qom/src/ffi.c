@@ -44,6 +44,8 @@ void virtmcu_icount_advance(int64_t delta)
 bool virtmcu_bql_locked(void) { return virtmcu_is_bql_locked(); }
 void virtmcu_bql_lock(void) { virtmcu_safe_bql_lock(); }
 void virtmcu_bql_unlock(void) { virtmcu_safe_bql_unlock(); }
+void virtmcu_bql_force_unlock(void) { virtmcu_bql_force_unlock(); }
+void virtmcu_bql_force_lock(void) { virtmcu_bql_force_lock(); }
 
 /* ── Mutex ───────────────────────────────────────────────────────────────── */
 

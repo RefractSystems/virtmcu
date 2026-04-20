@@ -12,12 +12,14 @@ dependencies = [
     "pytest-asyncio==0.23.5",
     "pytest-cov==4.1.0",
     "pyyaml==6.0.1",
+    "types-PyYAML",
     "lark==1.1.9",
 "hypothesis==6.152.1",
     "mcp==1.0.0",
     "ruff==0.15.11",
     "flatbuffers==25.12.19",
     "pyelftools==0.32",
+    "pytest-xdist==3.5.0",
 ]
 
 [tool.ruff]
@@ -25,11 +27,26 @@ line-length = 120
 exclude = [
     "third_party/",
     ".venv/",
+    ".cargo-cache/",
     "**/__pycache__/",
+    "**/*_fbs/",
+    "test/phase6/virtmcu/rf/",
 ]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I"]
+select = [
+    "E", "F", "W", "I",
+    "B",      # flake8-bugbear
+    "N",      # pep8-naming
+    "A",      # flake8-builtins
+    "C4",     # flake8-comprehensions
+    "RET",    # flake8-return
+    "SIM",    # flake8-simplify
+    "UP",     # pyupgrade
+    "ARG",    # flake8-unused-arguments
+    "PTH",    # flake8-use-pathlib
+    "RUF",    # ruff-specific rules
+]
 ignore = [
     "E501",   # line-too-long — acceptable in a C/embedded project with long strings
 ]
@@ -37,3 +54,26 @@ ignore = [
 [tool.pytest.ini_options]
 pythonpath = ["."]
 asyncio_mode = "strict"
+addopts = "-n auto"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.20.1",
+    "types-pyyaml>=6.0.12.20260408",
+]
+
+[tool.mypy]
+strict = false
+check_untyped_defs = true
+disallow_untyped_decorators = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unused_configs = true
+ignore_missing_imports = true
+exclude = [
+    "^tools/systemc_adapter/build/",
+    "^third_party/",
+    "build/",
+]
+
+

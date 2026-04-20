@@ -1,3 +1,4 @@
+#![cfg(qemu_headers_present)]
 #![deny(warnings)]
 #![deny(clippy::all)]
 #![deny(unused)]

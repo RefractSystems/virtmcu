@@ -1,0 +1,11 @@
+.venv
+third_party
+target
+build
+.pytest_cache
+.ruff_cache
+coverage_report
+coverage-data
+test-results
+*.pyc
+__pycache__

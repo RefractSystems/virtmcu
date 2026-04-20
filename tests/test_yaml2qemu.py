@@ -5,13 +5,13 @@ Tests the YAML platform description parser in isolation (no QEMU binary needed).
 Covers CPU mapping, peripheral mapping, interrupt parsing, and edge cases.
 """
 
-import os
 import sys
 import tempfile
+from pathlib import Path
 
 import yaml
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.insert(0, str(Path(__file__).resolve().parent / ".."))
 from tools.repl2qemu.parser import ReplPlatform
 from tools.yaml2qemu import parse_yaml_platform
 
@@ -20,10 +20,9 @@ from tools.yaml2qemu import parse_yaml_platform
 
 def write_yaml(data: dict) -> str:
     """Write a temporary YAML file, return its path. Caller must unlink."""
-    f = tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False)
-    yaml.dump(data, f)
-    f.close()
-    return f.name
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        yaml.dump(data, f)
+        return f.name
 
 
 # ── CPU mapping ───────────────────────────────────────────────────────────────
@@ -44,7 +43,7 @@ def test_parse_single_cpu():
         assert dev.type_name == "CPU.ARMv7A"
         assert dev.properties["cpuType"] == "cortex-a15"
     finally:
-        os.unlink(path)
+        Path(path).unlink()
 
 
 def test_parse_multi_cpu():
@@ -65,7 +64,7 @@ def test_parse_multi_cpu():
         names = {d.name for d in platform.devices}
         assert names == {"cpu0", "cpu1"}
     finally:
-        os.unlink(path)
+        Path(path).unlink()
 
 
 # ── Peripheral mapping ────────────────────────────────────────────────────────
@@ -91,7 +90,7 @@ def test_parse_uart_peripheral():
         assert devs[0].type_name == "UART.PL011"
         assert devs[0].address_str == "0x09000000"
     finally:
-        os.unlink(path)
+        Path(path).unlink()
 
 
 def test_parse_memory_with_properties():
@@ -114,7 +113,7 @@ def test_parse_memory_with_properties():
         assert dev.type_name == "Memory.MappedMemory"
         assert dev.properties["size"] == "0x00040000"
     finally:
-        os.unlink(path)
+        Path(path).unlink()
 
 
 def test_parse_interrupt():
@@ -139,7 +138,7 @@ def test_parse_interrupt():
         assert irq.target_device == "nvic"
         assert irq.target_range == "37"
     finally:
-        os.unlink(path)
+        Path(path).unlink()
 
 
 def test_renode_type_alias():
@@ -155,7 +154,7 @@ def test_renode_type_alias():
         dev = next(d for d in platform.devices if d.name == "uart0")
         assert dev.type_name == "UART.PL011"
     finally:
-        os.unlink(path)
+        Path(path).unlink()
 
 
 def test_empty_platform():
@@ -165,7 +164,7 @@ def test_empty_platform():
         assert isinstance(platform, ReplPlatform)
         assert len(platform.devices) == 0
     finally:
-        os.unlink(path)
+        Path(path).unlink()
 
 
 def test_cpu_and_peripherals_combined():
@@ -185,7 +184,7 @@ def test_cpu_and_peripherals_combined():
         names = {d.name for d in platform.devices}
         assert names == {"cpu0", "sram", "uart0"}
     finally:
-        os.unlink(path)
+        Path(path).unlink()
 
 
 # ── FdtEmitter Integration ───────────────────────────────────────────────────

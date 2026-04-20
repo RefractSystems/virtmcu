@@ -136,23 +136,16 @@ unsafe extern "C" fn zenoh_netdev_hook(
 ) -> c_int {
     let opts = &(*netdev).u.zenoh;
 
-    let nc = qemu_new_net_client(&NET_ZENOH_INFO, peer, c"zenoh".as_ptr(), name);
+    let nc = qemu_new_net_client(&raw const NET_ZENOH_INFO, peer, c"zenoh".as_ptr(), name);
     let s = &mut *(nc as *mut ZenohNetClient);
 
     let node_id = if opts.node.is_null() {
         0
     } else {
-        CStr::from_ptr(opts.node)
-            .to_string_lossy()
-            .parse::<u32>()
-            .unwrap_or(0)
+        CStr::from_ptr(opts.node).to_string_lossy().parse::<u32>().unwrap_or(0)
     };
 
-    let router = if opts.router.is_null() {
-        ptr::null()
-    } else {
-        opts.router as *const c_char
-    };
+    let router = if opts.router.is_null() { ptr::null() } else { opts.router.cast_const() };
 
     let topic = if opts.topic.is_null() {
         "sim/eth/frame".to_string()
@@ -162,10 +155,7 @@ unsafe extern "C" fn zenoh_netdev_hook(
 
     s.rust_state = zenoh_netdev_init_internal(nc, node_id, router, topic);
     if s.rust_state.is_null() {
-        error_setg!(
-            errp,
-            c"zenoh-netdev: failed to initialize Rust backend".as_ptr()
-        );
+        error_setg!(errp, "zenoh-netdev: failed to initialize Rust backend");
         return -1;
     }
 
@@ -208,7 +198,7 @@ extern "C" fn rx_timer_cb(opaque: *mut core::ffi::c_void) {
     let state = unsafe { &*(opaque as *mut ZenohNetdevState) };
     let now = unsafe { qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) } as u64;
 
-    let mut heap = state.local_heap.lock().unwrap();
+    let mut heap = state.local_heap.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
 
     // Drain MPSC channel into the priority queue (lock-free for Zenoh workers)
     while let Ok(packet) = state.rx_receiver.try_recv() {
@@ -217,7 +207,7 @@ extern "C" fn rx_timer_cb(opaque: *mut core::ffi::c_void) {
 
     while let Some(packet) = heap.peek() {
         if packet.vtime <= now {
-            let packet = heap.pop().unwrap();
+            let packet = heap.pop().unwrap_or_else(|| std::process::abort());
             unsafe {
                 virtmcu_qom::net::qemu_send_packet(
                     state.nc,
@@ -231,16 +221,12 @@ extern "C" fn rx_timer_cb(opaque: *mut core::ffi::c_void) {
     }
 
     if let Some(next_packet) = heap.peek() {
-        state
-            .earliest_vtime
-            .store(next_packet.vtime, AtomicOrdering::Release);
+        state.earliest_vtime.store(next_packet.vtime, AtomicOrdering::Release);
         unsafe {
             virtmcu_timer_mod(state.rx_timer, next_packet.vtime as i64);
         }
     } else {
-        state
-            .earliest_vtime
-            .store(u64::MAX, AtomicOrdering::Release);
+        state.earliest_vtime.store(u64::MAX, AtomicOrdering::Release);
     }
 }
 
@@ -260,10 +246,10 @@ fn zenoh_netdev_init_internal(
     let (tx, rx) = bounded(1024);
     let local_heap = Mutex::new(BinaryHeap::new());
     let earliest_vtime = Arc::new(AtomicU64::new(u64::MAX));
-    let earliest_clone = earliest_vtime.clone();
+    let earliest_clone = std::sync::Arc::clone(&earliest_vtime);
 
     let timer_ptr_clone = Arc::new(AtomicUsize::new(0));
-    let timer_ptr = timer_ptr_clone.clone();
+    let timer_ptr = std::sync::Arc::clone(&timer_ptr_clone);
 
     let subscriber = session
         .declare_subscriber(&topic)
@@ -281,15 +267,12 @@ fn zenoh_netdev_init_internal(
 
             let mut header = ZenohFrameHeader::default();
             unsafe {
-                std::ptr::copy_nonoverlapping(data.as_ptr(), &mut header as *mut _ as *mut u8, 12);
+                std::ptr::copy_nonoverlapping(data.as_ptr(), &raw mut header as *mut u8, 12);
             }
 
             let payload = data[12..].to_vec();
 
-            let packet = OrderedPacket {
-                vtime: header.delivery_vtime_ns,
-                data: payload,
-            };
+            let packet = OrderedPacket { vtime: header.delivery_vtime_ns, data: payload };
 
             let _ = tx.send(packet);
 
@@ -317,7 +300,7 @@ fn zenoh_netdev_init_internal(
         earliest_vtime,
     });
 
-    let state_ptr = &mut *state as *mut ZenohNetdevState;
+    let state_ptr = &raw mut *state;
     let rx_timer =
         unsafe { virtmcu_timer_new_ns(QEMU_CLOCK_VIRTUAL, rx_timer_cb, state_ptr as *mut c_void) };
 
@@ -333,16 +316,13 @@ fn zenoh_netdev_receive_internal(state: &ZenohNetdevState, buf: *const u8, size:
 
     let now = unsafe { qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) } as u64;
 
-    let header = ZenohFrameHeader {
-        delivery_vtime_ns: now,
-        size: size as u32,
-    };
+    let header = ZenohFrameHeader { delivery_vtime_ns: now, size: size as u32 };
 
     let mut data = Vec::with_capacity(12 + size);
     let mut header_bytes = [0u8; 12];
     unsafe {
         std::ptr::copy_nonoverlapping(
-            &header as *const _ as *const u8,
+            &raw const header as *const u8,
             header_bytes.as_mut_ptr(),
             12,
         );
@@ -352,4 +332,44 @@ fn zenoh_netdev_receive_internal(state: &ZenohNetdevState, buf: *const u8, size:
 
     let _ = state.session.put(tx_topic, data).wait();
     size as isize
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BinaryHeap;
+
+    #[test]
+    fn test_ordered_packet_ord() {
+        let mut heap = BinaryHeap::new();
+        heap.push(OrderedPacket { vtime: 1000, data: vec![1] });
+        heap.push(OrderedPacket { vtime: 500, data: vec![2] });
+        heap.push(OrderedPacket { vtime: 2000, data: vec![3] });
+
+        // Lowest vtime (500) should pop first (min-heap)
+        assert_eq!(heap.pop().unwrap_or_else(|| std::process::abort()).vtime, 500);
+        assert_eq!(heap.pop().unwrap_or_else(|| std::process::abort()).vtime, 1000);
+        assert_eq!(heap.pop().unwrap_or_else(|| std::process::abort()).vtime, 2000);
+    }
+
+    #[test]
+    fn test_zenoh_net_client_layout() {
+        // QEMU passes `*mut NetClientState` to our callbacks, and we cast it
+        // to `*mut ZenohNetClient`. The `nc` field MUST be at offset 0.
+        assert_eq!(
+            core::mem::offset_of!(ZenohNetClient, nc),
+            0,
+            "NetClientState must be the first field in ZenohNetClient"
+        );
+    }
+
+    #[test]
+    fn test_zenoh_netdev_qemu_layout() {
+        // QOM layout validation
+        assert_eq!(
+            core::mem::offset_of!(ZenohNetdevQEMU, parent_obj),
+            0,
+            "SysBusDevice must be the first field"
+        );
+    }
 }

@@ -12,6 +12,7 @@ session = zenoh.open(conf)
 
 print("[Flood] Connected to Zenoh.")
 
+
 def publish_netdev():
     pub = session.declare_publisher("sim/network/0/tx")
 
@@ -22,11 +23,12 @@ def publish_netdev():
     print("[Flood] Blasting 50,000 packets rapidly to trigger backpressure/OOM...")
 
     # Blast packets
-    for i in range(50000):
+    for _i in range(50000):
         pub.put(payload)
 
     print("[Flood] Blast complete. Awaiting crash or stability...")
     time.sleep(2)
+
 
 t1 = threading.Thread(target=publish_netdev)
 t1.start()

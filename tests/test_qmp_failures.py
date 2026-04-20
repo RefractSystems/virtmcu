@@ -1,6 +1,6 @@
 import asyncio
-import os
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -19,7 +19,7 @@ async def test_invalid_qmp_command(qmp_bridge):
 
 
 @pytest.mark.asyncio
-async def test_qemu_crash_handling(qemu_launcher):
+async def test_qemu_crash_handling(qemu_launcher):  # noqa: ARG001
     """
     Test how the bridge handles QEMU crashing mid-execution.
     """
@@ -27,7 +27,7 @@ async def test_qemu_crash_handling(qemu_launcher):
     import tempfile
 
     tmpdir = tempfile.mkdtemp()
-    qmp_sock = os.path.join(tmpdir, "qmp.sock")
+    qmp_sock = Path(tmpdir) / "qmp.sock"
 
     proc = subprocess.Popen(
         [
@@ -44,13 +44,13 @@ async def test_qemu_crash_handling(qemu_launcher):
 
     # Wait for socket
     for _ in range(50):
-        if os.path.exists(qmp_sock):
+        if Path(qmp_sock).exists():
             break
         await asyncio.sleep(0.1)
 
     bridge = QmpBridge()
     try:
-        await bridge.connect(qmp_sock)
+        await bridge.connect(str(qmp_sock))
 
         # Kill QEMU
         proc.kill()

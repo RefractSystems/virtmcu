@@ -7,9 +7,9 @@
 # ==============================================================================
 
 import argparse
-import os
 import subprocess
 import sys
+from pathlib import Path
 
 import yaml
 
@@ -23,8 +23,14 @@ def parse_yaml_platform(yaml_path: str) -> tuple[ReplPlatform, dict]:
     hints_dict is reserved for future metadata (e.g. default clock rates); callers
     that don't need it can unpack with ``platform, _ = parse_yaml_platform(path)``.
     """
-    with open(yaml_path, "r") as f:
+    with Path(yaml_path).open() as f:
         data = yaml.safe_load(f)
+
+    # Hardening: Check for unknown top-level keys to prevent silent failures
+    KNOWN_KEYS = {"machine", "peripherals", "memory", "include"}  # noqa: N806
+    for key in data:
+        if key not in KNOWN_KEYS:
+            print(f"Warning: Unknown top-level key '{key}' in {yaml_path}. It will be ignored.", file=sys.stderr)
 
     platform = ReplPlatform()
 
@@ -49,7 +55,25 @@ def parse_yaml_platform(yaml_path: str) -> tuple[ReplPlatform, dict]:
 
         platform.devices.append(dev)
 
-    # 2. Map Peripherals
+    # 2. Map Memory
+    # Support a dedicated 'memory' section to avoid requiring 'Memory.MappedMemory' type in peripherals.
+    for m in data.get("memory", []):
+        addr_val = m.get("address", 0)
+        address_str = hex(addr_val) if isinstance(addr_val, int) else str(addr_val)
+
+        # properties must be dict[str, str] for ReplDevice, but we support ints in YAML
+        size = m.get("size", 0)
+        size_str = hex(size) if isinstance(size, int) else str(size)
+
+        dev = ReplDevice(
+            name=m["name"],
+            type_name="Memory.MappedMemory",
+            address_str=address_str,
+            properties={"size": size_str},
+        )
+        platform.devices.append(dev)
+
+    # 3. Map Peripherals
     for p in data.get("peripherals", []):
         # Support both 'renode_type' (for migrated files) or 'type' (for native ones)
         type_name = p.get("type") or p.get("renode_type", "Unknown")
@@ -109,6 +133,39 @@ def validate_dtb(dtb_path, devices):
 
             if dts_node not in dts:
                 missing.append(dev.name)
+            elif dev.type_name == "Memory.MappedMemory" and "size" in dev.properties:
+                # Task: Verify memory size matches
+                try:
+                    expected_size = int(dev.properties["size"], 0)
+                    # Simple heuristic: find the node block and check reg property
+                    # DTS format: reg = <base_hi base_lo size_hi size_lo>;
+                    node_start = dts.find(dts_node)
+                    node_end = dts.find("};", node_start)
+                    node_content = dts[node_start:node_end]
+
+                    import re
+
+                    # Robust regex: handle 0x or decimal, and varying whitespace
+                    reg_match = re.search(
+                        r"reg = <((?:0x)?[0-9a-fA-F]+)\s+((?:0x)?[0-9a-fA-F]+)\s+((?:0x)?[0-9a-fA-F]+)\s+((?:0x)?[0-9a-fA-F]+)>",
+                        node_content,
+                    )
+                    if reg_match:
+
+                        def to_int(s):
+                            return int(s, 16) if s.startswith("0x") else int(s)
+
+                        size_hi = to_int(reg_match.group(3))
+                        size_lo = to_int(reg_match.group(4))
+                        actual_size = (size_hi << 32) | size_lo
+                        if actual_size != expected_size:
+                            print(
+                                f"ERROR: Memory node '{dev.name}' size mismatch! Expected {hex(expected_size)}, found {hex(actual_size)}",
+                                file=sys.stderr,
+                            )
+                            missing.append(f"{dev.name} (size mismatch)")
+                except Exception as e:
+                    print(f"⚠️ Warning: Could not verify size for {dev.name}: {e}", file=sys.stderr)
 
         if missing:
             print(
@@ -144,7 +201,7 @@ def main():
 
     args = parser.parse_args()
 
-    if not os.path.exists(args.input):
+    if not Path(args.input).exists():
         print(f"Error: Input file '{args.input}' not found.")
         sys.exit(1)
 
@@ -156,7 +213,7 @@ def main():
     emitter = FdtEmitter(platform)
     arch = emitter.arch
     if args.out_arch:
-        with open(args.out_arch, "w") as f:
+        with Path(args.out_arch).open("w") as f:
             f.write(arch)
 
     # Extract devices that require explicit CLI instantiation.
@@ -203,6 +260,8 @@ def main():
             cli_args.append(device_arg)
             filtered_devices.append(dev)  # Keep in DTB
         else:
+            if dev.type_name == "zenoh-wifi":
+                dev.type_name = "virtmcu-wifi"
             filtered_devices.append(dev)
 
     platform.devices = filtered_devices
@@ -211,7 +270,7 @@ def main():
     dts = emitter.generate_dts()
 
     if args.out_cli:
-        with open(args.out_cli, "w") as f:
+        with Path(args.out_cli).open("w") as f:
             for arg in cli_args:
                 f.write(arg + "\n")
 

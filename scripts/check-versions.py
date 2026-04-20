@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-import os
 import re
 import sys
+from pathlib import Path
 
 
 def get_versions():
     versions = {}
-    with open("VERSIONS", "r") as f:
+    with Path("VERSIONS").open() as f:
         for line in f:
             if "=" in line and not line.startswith("#"):
                 key, value = line.strip().split("=")
                 versions[key] = value
     return versions
+
 
 def check():
     versions = get_versions()
@@ -19,8 +20,8 @@ def check():
 
     # 1. Check docker/Dockerfile
     dockerfile_path = "docker/Dockerfile"
-    if os.path.exists(dockerfile_path):
-        with open(dockerfile_path, "r") as f:
+    if Path(dockerfile_path).exists():
+        with Path(dockerfile_path).open() as f:
             content = f.read()
 
         mappings = {
@@ -29,10 +30,13 @@ def check():
             "CMAKE_VERSION": r"ARG CMAKE_VERSION=([^ \n]+)",
             "RUST_VERSION": r"ARG RUST_VERSION=([^ \n]+)",
             "FLATBUFFERS_VERSION": r"ARG FLATBUFFERS_VERSION=([^ \n]+)",
+            "FLATCC_VERSION": r"ARG FLATCC_VERSION=([^ \n]+)",
             "DEBIAN_CODENAME": r"ARG DEBIAN_CODENAME=([^ \n]+)",
             "NODE_VERSION": r"ARG NODE_VERSION=([^ \n]+)",
             "PYTHON_VERSION": r"ARG PYTHON_VERSION=([^ \n]+)",
             "ARM_TOOLCHAIN_VERSION": r"ARG ARM_TOOLCHAIN_VERSION=([^ \n]+)",
+            "HADOLINT_VERSION": r"ARG HADOLINT_VERSION=([^ \n]+)",
+            "ACTIONLINT_VERSION": r"ARG ACTIONLINT_VERSION=([^ \n]+)",
         }
 
         for key, pattern in mappings.items():
@@ -47,8 +51,8 @@ def check():
 
     # 2. Check pyproject.toml
     pyproject_path = "pyproject.toml"
-    if os.path.exists(pyproject_path):
-        with open(pyproject_path, "r") as f:
+    if Path(pyproject_path).exists():
+        with Path(pyproject_path).open() as f:
             content = f.read()
 
         zenoh_ver = versions.get("ZENOH_VERSION")
@@ -69,8 +73,8 @@ def check():
 
     # 3. Check requirements.txt
     req_path = "requirements.txt"
-    if os.path.exists(req_path):
-        with open(req_path, "r") as f:
+    if Path(req_path).exists():
+        with Path(req_path).open() as f:
             content = f.read()
 
         zenoh_ver = versions.get("ZENOH_VERSION")
@@ -91,8 +95,8 @@ def check():
 
     # 4. Check ci.yml hardcoded PYTHON_VERSION matches VERSIONS
     ci_path = ".github/workflows/ci.yml"
-    if os.path.exists(ci_path):
-        with open(ci_path, "r") as f:
+    if Path(ci_path).exists():
+        with Path(ci_path).open() as f:
             content = f.read()
         py_ver = versions.get("PYTHON_VERSION")
         if py_ver:
@@ -110,6 +114,7 @@ def check():
         sys.exit(1)
     else:
         print("Version check PASSED")
+
 
 if __name__ == "__main__":
     check()

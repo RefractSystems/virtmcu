@@ -5,15 +5,15 @@ Tests DTS generation and DTB compilation in isolation (no QEMU binary needed,
 but dtc must be installed for the compile_dtb test).
 """
 
-import os
 import subprocess
 import sys
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 # Import via the package so relative imports inside fdt_emitter resolve.
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "../../"))
 from tools.repl2qemu.fdt_emitter import COMPAT_MAP, FdtEmitter, compile_dtb
 from tools.repl2qemu.parser import ReplDevice, ReplInterrupt, ReplPlatform
 
@@ -173,8 +173,8 @@ def test_compile_dtb_produces_file(tmp_path):
     out = str(tmp_path / "test.dtb")
     result = compile_dtb(dts, out)
     assert result is True
-    assert os.path.exists(out)
-    assert os.path.getsize(out) > 0
+    assert Path(out).exists()
+    assert Path(out).stat().st_size > 0
 
 
 @pytest.mark.skipif(

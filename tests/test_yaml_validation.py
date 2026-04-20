@@ -1,7 +1,7 @@
-import os
 import subprocess
 import tempfile
 import unittest
+from pathlib import Path
 
 import yaml
 
@@ -13,8 +13,8 @@ class TestYamlValidation(unittest.TestCase):
         We simulate this by providing a YAML with a peripheral type that FdtEmitter skips.
         """
         with tempfile.TemporaryDirectory() as tmpdir:
-            yaml_path = os.path.join(tmpdir, "test.yaml")
-            dtb_path = os.path.join(tmpdir, "test.dtb")
+            yaml_path = Path(tmpdir) / "test.yaml"
+            dtb_path = Path(tmpdir) / "test.dtb"
 
             # Create a YAML with one valid peripheral and one 'Unknown' type which FdtEmitter skips
             test_yaml = {
@@ -29,12 +29,12 @@ class TestYamlValidation(unittest.TestCase):
                 ],
             }
 
-            with open(yaml_path, "w") as f:
+            with Path(yaml_path).open("w") as f:
                 yaml.dump(test_yaml, f)
 
             # Run yaml2qemu
             # It should fail because 'broken_dev' will be missing in DTB
-            cmd = ["python3", "-m", "tools.yaml2qemu", yaml_path, "--out-dtb", dtb_path]
+            cmd = ["python3", "-m", "tools.yaml2qemu", str(yaml_path), "--out-dtb", str(dtb_path)]
 
             result = subprocess.run(cmd, capture_output=True, text=True)
 
@@ -49,18 +49,18 @@ class TestYamlValidation(unittest.TestCase):
         Tests that yaml2qemu succeeds when all peripherals are correctly mapped.
         """
         with tempfile.TemporaryDirectory() as tmpdir:
-            yaml_path = os.path.join(tmpdir, "test.yaml")
-            dtb_path = os.path.join(tmpdir, "test.dtb")
+            yaml_path = Path(tmpdir) / "test.yaml"
+            dtb_path = Path(tmpdir) / "test.dtb"
 
             test_yaml = {
                 "machine": {"cpus": [{"name": "cpu0", "type": "cortex-a15"}]},
                 "peripherals": [{"name": "uart0", "type": "UART.PL011", "address": 0x10000000}],
             }
 
-            with open(yaml_path, "w") as f:
+            with Path(yaml_path).open("w") as f:
                 yaml.dump(test_yaml, f)
 
-            cmd = ["python3", "-m", "tools.yaml2qemu", yaml_path, "--out-dtb", dtb_path]
+            cmd = ["python3", "-m", "tools.yaml2qemu", str(yaml_path), "--out-dtb", str(dtb_path)]
 
             result = subprocess.run(cmd, capture_output=True, text=True)
 

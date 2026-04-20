@@ -13,7 +13,7 @@ async def test_qmp_rapid_commands(qmp_bridge):
     Stress test: Send 100 QMP commands in rapid succession.
     """
     start_time = time.time()
-    for i in range(100):
+    for _i in range(100):
         res = await qmp_bridge.execute("query-status")
         assert "running" in res
     duration = time.time() - start_time
@@ -26,7 +26,7 @@ async def test_qmp_concurrent_commands(qmp_bridge):
     Stress test: Send multiple QMP commands concurrently.
     """
 
-    async def task(id):
+    async def task(id):  # noqa: A002
         res = await qmp_bridge.execute("query-version")
         assert "qemu" in res
         return id

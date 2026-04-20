@@ -1,6 +1,7 @@
 import subprocess
 import tempfile
 import time
+from pathlib import Path
 
 
 def test_irq():
@@ -45,26 +46,39 @@ conn.close()
     bridge@50000000 {{ compatible = "mmio-socket-bridge"; reg = <0x0 0x50000000 0x0 0x1000>; socket-path = "{sock_path}"; region-size = <0x1000>; }};
 }};
 """
-    with open("/tmp/irq.dts", "w") as f: f.write(dts)
+    with Path("/tmp/irq.dts").open("w") as f:
+        f.write(dts)
     subprocess.run(["dtc", "-I", "dts", "-O", "dtb", "-o", "/tmp/irq.dtb", "/tmp/irq.dts"])
 
     # Dummy firmware: hlt (wait for interrupt)
-    with open("/tmp/irq.S", "w") as f: f.write(".global _start\n_start:\nwfi\nb _start\n")
-    subprocess.run(["arm-none-eabi-gcc", "-mcpu=cortex-a15", "-nostdlib", "-Ttext=0x40000000", "/tmp/irq.S", "-o", "/tmp/irq.elf"])
+    with Path("/tmp/irq.S").open("w") as f:
+        f.write(".global _start\n_start:\nwfi\nb _start\n")
+    subprocess.run(
+        ["arm-none-eabi-gcc", "-mcpu=cortex-a15", "-nostdlib", "-Ttext=0x40000000", "/tmp/irq.S", "-o", "/tmp/irq.elf"]
+    )
 
     # 3. Start QEMU
-    qemu_proc = subprocess.Popen([
-        "/workspace/third_party/qemu/build-virtmcu/install/bin/qemu-system-arm",
-        "-M", "arm-generic-fdt,hw-dtb=/tmp/irq.dtb",
-        "-kernel", "/tmp/irq.elf",
-        "-nographic", "-monitor", "none"
-    ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    qemu_proc = subprocess.Popen(
+        [
+            "/workspace/third_party/qemu/build-virtmcu/install/bin/qemu-system-arm",
+            "-M",
+            "arm-generic-fdt,hw-dtb=/tmp/irq.dtb",
+            "-kernel",
+            "/tmp/irq.elf",
+            "-nographic",
+            "-monitor",
+            "none",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
 
     time.sleep(5)
     qemu_proc.terminate()
     adapter_proc.terminate()
 
     print("IRQ test finished. Check coverage.")
+
 
 if __name__ == "__main__":
     test_irq()

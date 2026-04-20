@@ -1,5 +1,5 @@
-import os
 import tempfile
+from pathlib import Path
 
 import lark
 import yaml
@@ -20,7 +20,7 @@ def test_fuzz_yaml_parser(fuzz_data):
         try:
             parse_yaml_platform(tmp_path)
         finally:
-            os.remove(tmp_path)
+            Path(tmp_path).unlink()
 
     except (yaml.YAMLError, ValueError, TypeError, KeyError, AttributeError):
         pass

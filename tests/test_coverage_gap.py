@@ -1,12 +1,12 @@
-import os
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
 
 # Ensure we can import from tools
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.insert(0, str(Path(__file__).resolve().parent / ".."))
 
 from tools.qmp_probe import QMPClient, dump_tree
 from tools.qmp_probe import main as qmp_main
@@ -39,7 +39,7 @@ def test_repl2qemu_main_basic(tmp_path):
     with patch("sys.argv", test_args), patch("tools.repl2qemu.__main__.compile_dtb", return_value=True):
         repl2qemu_main()
 
-    assert os.path.exists(arch_file)
+    assert Path(arch_file).exists()
 
 
 def test_repl2qemu_parser_edge_cases():
@@ -79,8 +79,8 @@ uart0: UART.PL011 @ sysbus 0x09000000
 
     migrate(str(repl_file), str(yaml_file))
 
-    assert os.path.exists(yaml_file)
-    with open(yaml_file, "r") as f:
+    assert Path(yaml_file).exists()
+    with Path(yaml_file).open() as f:
         data = yaml.safe_load(f)
         assert data["machine"]["cpus"][0]["name"] == "cpu"
         assert data["peripherals"][0]["name"] == "uart0"
@@ -336,8 +336,8 @@ peripherals:
     ):
         main()
 
-    assert os.path.exists(arch_file)
-    with open(arch_file, "r") as f:
+    assert Path(arch_file).exists()
+    with Path(arch_file).open() as f:
         assert f.read() == "arm"
 
 
@@ -366,8 +366,8 @@ peripherals:
     ):
         main()
 
-    assert os.path.exists(cli_file)
-    with open(cli_file, "r") as f:
+    assert Path(cli_file).exists()
+    with Path(cli_file).open() as f:
         content = f.read()
         assert "-chardev" in content
         assert "zenoh,id=chr_serial0,node=1" in content

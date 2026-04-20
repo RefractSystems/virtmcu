@@ -1,6 +1,7 @@
 import subprocess
 import tempfile
 import time
+from pathlib import Path
 
 
 def test_handshake_fail():
@@ -32,23 +33,42 @@ conn.close()
     bridge@50000000 {{ compatible = "mmio-socket-bridge"; reg = <0x0 0x50000000 0x0 0x1000>; socket-path = "{sock_path}"; region-size = <0x1000>; reconnect-ms = <1000>; }};
 }};
 """
-    with open("/tmp/handshake.dts", "w") as f: f.write(dts)
+    with Path("/tmp/handshake.dts").open("w") as f:
+        f.write(dts)
     subprocess.run(["dtc", "-I", "dts", "-O", "dtb", "-o", "/tmp/handshake.dtb", "/tmp/handshake.dts"])
 
-    with open("/tmp/dummy.S", "w") as f: f.write(".global _start\n_start: b _start\n")
-    subprocess.run(["arm-none-eabi-gcc", "-mcpu=cortex-a15", "-nostdlib", "-Ttext=0x40000000", "/tmp/dummy.S", "-o", "/tmp/dummy.elf"])
+    with Path("/tmp/dummy.S").open("w") as f:
+        f.write(".global _start\n_start: b _start\n")
+    subprocess.run(
+        [
+            "arm-none-eabi-gcc",
+            "-mcpu=cortex-a15",
+            "-nostdlib",
+            "-Ttext=0x40000000",
+            "/tmp/dummy.S",
+            "-o",
+            "/tmp/dummy.elf",
+        ]
+    )
 
-    qemu_proc = subprocess.Popen([
-        "/workspace/third_party/qemu/build-virtmcu/install/bin/qemu-system-arm",
-        "-M", "arm-generic-fdt,hw-dtb=/tmp/handshake.dtb",
-        "-kernel", "/tmp/dummy.elf",
-        "-nographic", "-monitor", "none"
-    ])
+    qemu_proc = subprocess.Popen(
+        [
+            "/workspace/third_party/qemu/build-virtmcu/install/bin/qemu-system-arm",
+            "-M",
+            "arm-generic-fdt,hw-dtb=/tmp/handshake.dtb",
+            "-kernel",
+            "/tmp/dummy.elf",
+            "-nographic",
+            "-monitor",
+            "none",
+        ]
+    )
 
     time.sleep(3)
     qemu_proc.terminate()
     adapter_proc.terminate()
     print("Handshake test finished.")
+
 
 if __name__ == "__main__":
     test_handshake_fail()

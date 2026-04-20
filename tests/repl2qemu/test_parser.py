@@ -1,7 +1,7 @@
-import os
 import sys
+from pathlib import Path
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "../../"))
 from tools.repl2qemu.parser import parse_repl
 
 
@@ -147,7 +147,7 @@ def test_parser_main(tmp_path):
         [sys.executable, "-m", "tools.repl2qemu.parser", str(repl_file)],
         capture_output=True,
         text=True,
-        cwd=os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")),
+        cwd=Path(Path(Path(__file__).resolve().parent) / "../../"),
     )
     assert result.returncode == 0
     assert "sram" in result.stdout

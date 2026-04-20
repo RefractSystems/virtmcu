@@ -193,7 +193,6 @@ int rp_decode_payload(struct rp_pkt *pkt)
         pkt->interrupt.timestamp = be64toh(pkt->interrupt.timestamp);
         pkt->interrupt.vector = be64toh(pkt->interrupt.vector);
         pkt->interrupt.line = be32toh(pkt->interrupt.line);
-        pkt->interrupt.val = pkt->interrupt.val;
         used += pkt->hdr.len;
         break;
     case RP_CMD_sync:
@@ -228,7 +227,7 @@ size_t rp_encode_hello_caps(uint32_t id, uint32_t dev, struct rp_pkt_hello *pkt,
                             uint32_t *caps, uint32_t *caps_out,
                             uint32_t caps_len)
 {
-    size_t psize = sizeof *pkt + sizeof caps[0] * caps_len;
+    size_t psize = sizeof *pkt + sizeof(uint32_t) * caps_len;
     unsigned int i;
 
     rp_encode_hdr(&pkt->hdr, RP_CMD_hello, id, dev,
@@ -236,7 +235,7 @@ size_t rp_encode_hello_caps(uint32_t id, uint32_t dev, struct rp_pkt_hello *pkt,
     pkt->version.major = htobe16(version_major);
     pkt->version.minor = htobe16(version_minor);
 
-    /* Feature list is appeneded right after the hello packet.  */
+    /* Feature list is appended right after the hello packet.  */
     pkt->caps.offset = htobe32(sizeof *pkt);
     pkt->caps.len = htobe16(caps_len);
 

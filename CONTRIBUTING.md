@@ -48,11 +48,26 @@ The devcontainer automatically:
 3. Runs `make setup-initial` — patches and builds QEMU (~10 min, runs once)
 4. Synchronizes the Python environment using `uv sync`
 5. Activates the venv in every new terminal
+6. Configures Git to use `gh auth git-credential` for push/pull.
 
-**Note on Host Credentials (`gh` CLI and SSH):**
-The devcontainer securely maps your host's `~/.ssh` agent (via SSH_AUTH_SOCK) and `~/.config/gh` so you don't need to re-authenticate inside the container.
-* **macOS / Windows:** This works out-of-the-box using the standard token cache.
-* **Linux Desktop:** By default, `gh` stores its token in the OS Keyring (e.g., Gnome Keyring), which the headless container cannot read. If `gh` is unauthenticated in the container, you must run this once *on your host*: `gh auth login --insecure-storage` to save the token to the config file instead.
+**Authentication & Cloning (CRITICAL):**
+To avoid painful SSH socket forwarding issues inside the devcontainer, **you must use the GitHub CLI (`gh`) for authentication and clone via HTTPS.**
+
+```bash
+# 1. Install GitHub CLI on your host machine
+# Mac: brew install gh
+# Linux: apt install gh
+
+# 2. Authenticate to GitHub (Choose HTTPS when prompted for preferred protocol)
+# Linux desktop users must use --insecure-storage
+gh auth login
+
+# 3. Clone this repo using HTTPS (NOT SSH)
+git clone https://github.com/RefractSystems/virtmcu.git
+cd virtmcu
+```
+
+The devcontainer securely maps your host's `~/.config/gh` directory so you don't need to re-authenticate inside the container. If you clone via HTTPS, your git pushes and pulls will work seamlessly without fighting SSH keys.
 
 Nothing else is needed. Skip to [Development Workflow](#development-workflow).
 
@@ -147,11 +162,23 @@ uv run python -m tools.repl2qemu path/to/board.repl --out-dtb board.dtb --print-
 uv run pytest tests/ -v
 ```
 
+## CI and Pre-Push Validation
+
+Before opening a PR or pushing code to `main`, you should run our local CI validation suite to catch linting, versioning, and compilation errors. Our CI pipeline is highly optimized using GHCR caching.
+
+*   **Fast Pre-Push Check (~2 mins):** Run `make ci-local` to run all static analysis, version checks, and unit tests.
+*   **Static Analyzers & Memory Sanitizers:** Run `make ci-miri` (for Rust Undefined Behavior) and `make ci-asan` (for Memory Sanitizers).
+*   **Full Pipeline Validation (~40 mins cold, fast if cached):** Run `make ci-full` to execute the complete matrix of smoke tests exactly as they run on GitHub Actions inside the isolated builder container. This also includes the Miri and ASan checks. Passing this guarantees GitHub CI will pass.
+
+**For a detailed breakdown of how our CI pipeline works, how it uses Docker layer caching via GHCR, and how to debug specific failures, please read the [CI/CD Guide](docs/CI_GUIDE.md).**
+
 ---
 
 ## Testing and Regression
 
 virtmcu relies on automated testing to ensure new features (like parsing or new peripherals) don't break earlier architectural work. All tests must be properly documented.
+
+**Parallel Execution Warning:** Our test suites run in parallel by default (`-n auto`). When writing new tests, ensure they are isolated and do not rely on fixed ports or shared files that could cause race conditions or resource contention with other tests running in the background.
 
 We split testing into two categories:
 

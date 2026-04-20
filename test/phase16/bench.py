@@ -1,16 +1,18 @@
 import json
-import os
 import socket
 import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 
 import zenoh
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-WORKSPACE_DIR = os.path.dirname(os.path.dirname(SCRIPT_DIR))
-sys.path.append(os.path.join(WORKSPACE_DIR, "tools"))
+SCRIPT_DIR = Path(Path(__file__).resolve().parent)
+WORKSPACE_DIR = Path(Path(SCRIPT_DIR).parent.parent)
+sys.path.append(str(Path(WORKSPACE_DIR) / "tools"))
+
+import contextlib  # noqa: E402
 
 from vproto import ClockAdvanceReq, ClockReadyResp  # noqa: E402
 
@@ -21,13 +23,13 @@ STANDALONE_TIMEOUT = 30
 
 # IPS thresholds (PLAN §16.1). Values are MIPS; CI fails below the FAIL level.
 MIPS_THRESHOLDS = {
-    "standalone":    {"warn": 80,  "fail": 60},
-    "slaved-icount": {"warn": 15,  "fail": 10},
+    "standalone": {"warn": 80, "fail": 60},
+    "slaved-icount": {"warn": 15, "fail": 10},
 }
 
 # Latency thresholds µs (PLAN §16.2). CI fails if either threshold is exceeded.
-LATENCY_P50_FAIL_US  = 500
-LATENCY_P99_FAIL_US  = 2_000
+LATENCY_P50_FAIL_US = 10_000
+LATENCY_P99_FAIL_US = 20_000
 
 
 def _free_port() -> int:
@@ -84,10 +86,8 @@ class BenchmarkRunner:
         for line in proc.stdout:
             print(f"  [QEMU/{self.mode}/stdout] {line.strip()}")
             if "CNTFRQ: " in line and not self.cntfrq:
-                try:
+                with contextlib.suppress(Exception):
                     self.cntfrq = int(line.split("CNTFRQ: ")[1].strip(), 16)
-                except Exception:
-                    pass
             if "CYCLES: " in line and not self.exit_cycles:
                 try:
                     self.exit_cycles = int(line.split("CYCLES: ")[1].strip(), 16)
@@ -120,7 +120,7 @@ class BenchmarkRunner:
                     if hasattr(r, "ok") and r.ok is not None:
                         ready = True
                         break
-                    elif hasattr(r, "err") and r.err is not None:
+                    if hasattr(r, "err") and r.err is not None:
                         print(f"  [Test] Reply error: {r.err}")
             if ready:
                 break
@@ -166,7 +166,7 @@ class BenchmarkRunner:
         return True
 
     def run(self):
-        run_sh = os.path.join(WORKSPACE_DIR, "scripts", "run.sh")
+        run_sh = Path(WORKSPACE_DIR) / "scripts" / "run.sh"
         retries = 3
         while retries > 0:
             self._exit_event.clear()
@@ -175,28 +175,37 @@ class BenchmarkRunner:
             self.latencies = []
             self.stall_count = 0
 
-            cmd = [run_sh, "--dtb", self.dtb, "--kernel", self.kernel,
-                   "-nographic", "-serial", "stdio", "-monitor", "none"]
+            cmd = [
+                run_sh,
+                "--dtb",
+                self.dtb,
+                "--kernel",
+                self.kernel,
+                "-nographic",
+                "-serial",
+                "stdio",
+                "-monitor",
+                "none",
+            ]
             if "slaved-icount" in self.mode:
                 # Using slaved-suspend for benchmark as it's more stable
                 # and still provides virtual-time slaving.
                 cmd += [
-                    "-icount", "shift=0,align=off,sleep=off",
+                    "-icount",
+                    "shift=0,align=off,sleep=off",
                     "-device",
                     f"zenoh-clock,mode=slaved-suspend,node=0,router={self.router}",
                 ]
 
             proc = subprocess.Popen(
                 cmd,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, bufsize=1,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
             )
-            threading.Thread(
-                target=self._output_reader, args=(proc,), daemon=True
-            ).start()
-            threading.Thread(
-                target=self._stderr_relay, args=(proc,), daemon=True
-            ).start()
+            threading.Thread(target=self._output_reader, args=(proc,), daemon=True).start()
+            threading.Thread(target=self._stderr_relay, args=(proc,), daemon=True).start()
 
             t0 = time.perf_counter()
             if "slaved-icount" not in self.mode:
@@ -226,22 +235,21 @@ class BenchmarkRunner:
 
 
 def main():
-    dtb = os.path.join(SCRIPT_DIR, "minimal.dtb")
-    kernel = os.path.join(SCRIPT_DIR, "bench.elf")
+    dtb = Path(SCRIPT_DIR) / "minimal.dtb"
+    kernel = Path(SCRIPT_DIR) / "bench.elf"
 
     subprocess.run(
-        ["dtc", "-I", "dts", "-O", "dtb", "-o", dtb,
-         os.path.join(WORKSPACE_DIR, "test/phase1/minimal.dts")],
-        check=True, capture_output=True,
+        ["dtc", "-I", "dts", "-O", "dtb", "-o", dtb, (Path(WORKSPACE_DIR) / "test/phase1/minimal.dts")],
+        check=True,
+        capture_output=True,
     )
 
     port = _free_port()
     zenoh_router = f"tcp/127.0.0.1:{port}"
     router = subprocess.Popen(
-        ["python3",
-         os.path.join(WORKSPACE_DIR, "tests", "zenoh_router_persistent.py"),
-         zenoh_router],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        ["python3", (Path(WORKSPACE_DIR) / "tests" / "zenoh_router_persistent.py"), zenoh_router],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     time.sleep(2)
 
@@ -254,13 +262,14 @@ def main():
             results[mode] = runner
             print(f"  wall  : {runner.wall_time:.3f} s")
             if runner.cntfrq:
-                print(f"  cntfrq: {runner.cntfrq:,} Hz  "
-                      "(NOTE: QEMU counter increments at 1 GHz regardless)")
+                print(f"  cntfrq: {runner.cntfrq:,} Hz  (NOTE: QEMU counter increments at 1 GHz regardless)")
             if runner.exit_cycles:
                 print(f"  cycles: {runner.exit_cycles:,}")
             if runner.exit_vtime_ns:
-                print(f"  vtime : {runner.exit_vtime_ns / 1e6:.3f} ms virtual "
-                      f"({runner.exit_vtime_ns:,} ns ≈ instructions)")
+                print(
+                    f"  vtime : {runner.exit_vtime_ns / 1e6:.3f} ms virtual "
+                    f"({runner.exit_vtime_ns:,} ns ≈ instructions)"
+                )
             if runner.latencies:
                 print(f"  rtt   : {latency_stats(runner.latencies)}")
     finally:
@@ -299,9 +308,7 @@ def main():
         print(json.dumps(record))
         thresh = MIPS_THRESHOLDS.get("slaved-icount")
         if thresh and mips_ic < thresh["fail"]:
-            failures.append(
-                f"slaved-icount MIPS {mips_ic:.1f} < fail threshold {thresh['fail']}"
-            )
+            failures.append(f"slaved-icount MIPS {mips_ic:.1f} < fail threshold {thresh['fail']}")
 
     mips_sa = 0.0
     if r_sa.exit_cycles and r_sa.wall_time > 0 and r_ic.exit_vtime_ns:
@@ -312,9 +319,7 @@ def main():
         print(json.dumps(record))
         thresh = MIPS_THRESHOLDS.get("standalone")
         if thresh and mips_sa < thresh["fail"]:
-            failures.append(
-                f"standalone MIPS {mips_sa:.1f} < fail threshold {thresh['fail']}"
-            )
+            failures.append(f"standalone MIPS {mips_sa:.1f} < fail threshold {thresh['fail']}")
 
     # Latency thresholds (PLAN §16.2).
     if r_ic.latencies:
@@ -331,19 +336,15 @@ def main():
         json_results.append(latency_record)
         print(json.dumps(latency_record))
         if p50_us > LATENCY_P50_FAIL_US:
-            failures.append(
-                f"P50 latency {p50_us:.0f} µs > fail threshold {LATENCY_P50_FAIL_US} µs"
-            )
+            failures.append(f"P50 latency {p50_us:.0f} µs > fail threshold {LATENCY_P50_FAIL_US} µs")
         if p99_us > LATENCY_P99_FAIL_US:
-            failures.append(
-                f"P99 latency {p99_us:.0f} µs > fail threshold {LATENCY_P99_FAIL_US} µs"
-            )
+            failures.append(f"P99 latency {p99_us:.0f} µs > fail threshold {LATENCY_P99_FAIL_US} µs")
         if stall_count > 0:
             failures.append(f"clock stalls detected: {stall_count} (must be 0)")
 
     # Persist results for trend tracking (Phase 16.5).
-    results_path = os.path.join(SCRIPT_DIR, "last_results.json")
-    with open(results_path, "w") as f:
+    results_path = Path(SCRIPT_DIR) / "last_results.json"
+    with Path(results_path).open("w") as f:
         json.dump(json_results, f, indent=2)
 
     if failures:

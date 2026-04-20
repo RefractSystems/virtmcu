@@ -11,7 +11,8 @@ members = [
     "hw/rust/zenoh-actuator",
     "hw/rust/zenoh-802154",
     "hw/rust/zenoh-ui",
-    "hw/rust/test-qom-device",
+    "hw/rust/zenoh-flexray",
+    "hw/rust/test-qom-device", "tools/cyber_bridge",
 ]
 resolver = "2"
 
@@ -19,6 +20,8 @@ resolver = "2"
 version = "0.1.0"
 edition = "2021"
 authors = ["virtmcu developers"]
+publish = false
+license = "Apache-2.0"
 
 [workspace.dependencies]
 zenoh = "1.9.0"
@@ -35,3 +38,9 @@ panic = "abort"
 
 [profile.dev]
 panic = "abort"
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+clone_on_ref_ptr = "deny"
+pedantic = "warn"

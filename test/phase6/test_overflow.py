@@ -10,6 +10,7 @@ def main():
     s = zenoh.open(conf)
 
     rx_frames = []
+
     def on_rx(sample):
         rx_frames.append(sample.payload.to_bytes())
 
@@ -31,7 +32,7 @@ def main():
         print("FAIL: No frame received")
         sys.exit(1)
 
-    vtime, size = struct.unpack("<QI", rx_frames[0][:12])
+    vtime, _size = struct.unpack("<QI", rx_frames[0][:12])
     print(f"Original vtime: {orig_vtime}")
     print(f"Forwarded vtime: {vtime}")
 
@@ -42,6 +43,7 @@ def main():
         print("PASS: VTime did not wrap around.")
 
     s.close()
+
 
 if __name__ == "__main__":
     main()

@@ -9,11 +9,12 @@ def qmp_cmd(sock, cmd, args=None):
     req = {"execute": cmd}
     if args:
         req["arguments"] = args
-    sock.sendall((json.dumps(req) + '\n').encode('utf-8'))
+    sock.sendall((json.dumps(req) + "\n").encode("utf-8"))
     while True:
-        resp = json.loads(sock.recv(4096).decode('utf-8').split('\n')[0])
+        resp = json.loads(sock.recv(4096).decode("utf-8").split("\n")[0])
         if "return" in resp or "error" in resp:
             return resp
+
 
 def main():
     if len(sys.argv) < 2:
@@ -30,7 +31,7 @@ def main():
     print("Starting QOM stress...")
     start_time = time.time()
     i = 0
-    while time.time() - start_time < 3: # run for 3 seconds
+    while time.time() - start_time < 3:  # run for 3 seconds
         obj_id = f"obj_{i}"
         # Create a secret object
         resp = qmp_cmd(sock, "object-add", {"qom-type": "secret", "id": obj_id, "data": "dummy"})
@@ -44,6 +45,7 @@ def main():
             sys.exit(1)
         i += 1
     print(f"Stress test complete. Performed {i} add/del cycles.")
+
 
 if __name__ == "__main__":
     main()

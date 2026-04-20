@@ -11,6 +11,7 @@ SYSC_MSG_RESP = 0
 SYSC_MSG_IRQ_SET = 1
 SYSC_MSG_IRQ_CLEAR = 2
 
+
 class MMIOClient:
     def __init__(self, socket_path):
         self.socket_path = socket_path
@@ -47,10 +48,10 @@ class MMIOClient:
 
         # Wait for response, but handle IRQs in between
         while True:
-            msg_type, irq_num, msg_data = self._read_msg()
+            msg_type, irq_num, _msg_data = self._read_msg()
             if msg_type == SYSC_MSG_RESP:
                 return
-            elif msg_type == SYSC_MSG_IRQ_SET:
+            if msg_type == SYSC_MSG_IRQ_SET:
                 self.irqs[irq_num] = True
             elif msg_type == SYSC_MSG_IRQ_CLEAR:
                 self.irqs[irq_num] = False
@@ -63,7 +64,7 @@ class MMIOClient:
             msg_type, irq_num, msg_data = self._read_msg()
             if msg_type == SYSC_MSG_RESP:
                 return msg_data
-            elif msg_type == SYSC_MSG_IRQ_SET:
+            if msg_type == SYSC_MSG_IRQ_SET:
                 self.irqs[irq_num] = True
             elif msg_type == SYSC_MSG_IRQ_CLEAR:
                 self.irqs[irq_num] = False

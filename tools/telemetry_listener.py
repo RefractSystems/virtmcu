@@ -1,8 +1,8 @@
-import os
 import sys
+from pathlib import Path
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(os.path.join(SCRIPT_DIR, "telemetry_fbs"))
+SCRIPT_DIR = Path(Path(__file__).resolve().parent)
+sys.path.append(str(Path(SCRIPT_DIR) / "telemetry_fbs"))
 
 import zenoh  # noqa: E402
 from Virtmcu.Telemetry.TraceEvent import TraceEvent  # noqa: E402
@@ -18,10 +18,7 @@ def on_sample(sample):
         ev_id = ev.Id()
         val = ev.Value()
         name = ev.DeviceName()
-        if name:
-            name_str = name.decode("utf-8")
-        else:
-            name_str = ""
+        name_str = name.decode("utf-8") if name else ""
 
         if ev_type == 0:  # CPU_STATE
             type_str = "CPU_STATE"

@@ -1,7 +1,8 @@
 import asyncio
+import contextlib
 import logging
 import re
-from typing import Any, Dict, Optional
+from typing import Any
 
 from qemu.qmp import QMPClient
 
@@ -18,12 +19,12 @@ class QmpBridge:
 
     def __init__(self):
         self.qmp = QMPClient("virtmcu-tester")
-        self.uart_reader: Optional[asyncio.StreamReader] = None
-        self.uart_writer: Optional[asyncio.StreamWriter] = None
+        self.uart_reader: asyncio.StreamReader | None = None
+        self.uart_writer: asyncio.StreamWriter | None = None
         self.uart_buffer = ""
-        self._read_task: Optional[asyncio.Task] = None
+        self._read_task: asyncio.Task | None = None
 
-    async def connect(self, qmp_socket_path: str, uart_socket_path: Optional[str] = None):
+    async def connect(self, qmp_socket_path: str, uart_socket_path: str | None = None):
         """
         Connects to the QMP socket and optionally the UART socket.
         """
@@ -50,7 +51,7 @@ class QmpBridge:
         except Exception as e:
             logger.error(f"UART read error: {e}")
 
-    async def execute(self, cmd: str, args: Optional[Dict[str, Any]] = None) -> Any:
+    async def execute(self, cmd: str, args: dict[str, Any] | None = None) -> Any:
         """
         Executes a QMP command and returns the result.
         """
@@ -75,18 +76,22 @@ class QmpBridge:
                 if current_vtime > start_vtime:
                     # Virtual time is advancing — use it as the authoritative clock.
                     if (current_vtime - start_vtime) / 1e9 > timeout:
-                        raise asyncio.TimeoutError()
+                        raise TimeoutError()
                 else:
                     # Standalone mode or VM paused at startup — fall back to wall clock.
                     if asyncio.get_running_loop().time() - start_wall > timeout:
-                        raise asyncio.TimeoutError()
+                        raise TimeoutError()
                 await asyncio.sleep(0.1)
 
         async def get_event():
-            async with self.qmp.listen() as listener:
+            from qemu.qmp.events import EventListener
+
+            listener = EventListener()
+            with self.qmp.listen(listener):
                 async for event in listener:
                     if event["event"] == event_name:
                         return event
+            return None
 
         event_task = asyncio.create_task(get_event())
         timeout_task = asyncio.create_task(poll_timeout())
@@ -98,10 +103,8 @@ class QmpBridge:
 
         for task in pending:
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await task
-            except asyncio.CancelledError:
-                pass
 
         # Check tasks by identity so the outcome is deterministic even if both
         # tasks land in `done` simultaneously (asyncio sets have no order).
@@ -218,10 +221,8 @@ class QmpBridge:
         """
         if self._read_task:
             self._read_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._read_task
-            except asyncio.CancelledError:
-                pass
 
         if self.uart_writer:
             self.uart_writer.close()

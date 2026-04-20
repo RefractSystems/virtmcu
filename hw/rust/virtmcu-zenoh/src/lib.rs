@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use core::ffi::c_char;
 use std::ffi::CStr;
 use std::time::Duration;
@@ -16,10 +17,13 @@ pub unsafe fn open_session(router: *const c_char) -> Result<Session, zenoh::Erro
     let mut config = Config::default();
     let mut has_router = false;
 
+    // Task 4.2: High-performance executor for co-simulation
+    let _ = config.insert_json5("task_planning/concurrency", "8");
+
     if !router.is_null() {
         if let Ok(r_str) = CStr::from_ptr(router).to_str() {
             if !r_str.is_empty() {
-                let json = format!("[\"{}\"]", r_str);
+                let json = format!("[\"{r_str}\"]");
                 let _ = config.insert_json5("mode", "\"client\"");
                 let _ = config.insert_json5("connect/endpoints", &json);
                 let _ = config.insert_json5("scouting/multicast/enabled", "false");
@@ -31,7 +35,7 @@ pub unsafe fn open_session(router: *const c_char) -> Result<Session, zenoh::Erro
 
     let session = zenoh::open(config)
         .wait()
-        .map_err(|e| zenoh::Error::from(format!("Failed to open Zenoh session: {}", e)))?;
+        .map_err(|e| zenoh::Error::from(format!("Failed to open Zenoh session: {e}")))?;
     virtmcu_qom::vlog!("[virtmcu-zenoh] Session returned from zenoh::open.wait().\n");
 
     // If a router was provided, verify we can actually reach it.
@@ -65,9 +69,7 @@ pub unsafe fn open_session(router: *const c_char) -> Result<Session, zenoh::Erro
                 "[virtmcu-zenoh] Failed to connect to explicit router after 2 seconds."
             );
             let _ = session.close().wait();
-            return Err(zenoh::Error::from(
-                "Failed to connect to explicit router".to_string(),
-            ));
+            return Err(zenoh::Error::from("Failed to connect to explicit router".to_string()));
         }
     }
 

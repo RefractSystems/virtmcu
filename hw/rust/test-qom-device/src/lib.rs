@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 #![no_std]
 #![allow(clippy::missing_safety_doc)]
 
@@ -6,17 +7,20 @@ use virtmcu_qom::chardev::CharFrontend;
 use virtmcu_qom::memory::{
     MemoryRegion, MemoryRegionImplRange, MemoryRegionOps, MemoryRegionValidRange,
 };
-use virtmcu_qom::qdev::SysBusDevice;
+use virtmcu_qom::qdev::{MACAddr, SysBusDevice};
 use virtmcu_qom::qom::{ObjectClass, TypeInfo};
 use virtmcu_qom::ssi::{SSIPeripheral, SSIPeripheralClass, TYPE_SSI_PERIPHERAL};
-use virtmcu_qom::{
-    declare_device_type, define_prop_chr, define_properties, device_class, ssi_peripheral_class,
-};
+use virtmcu_qom::{declare_device_type, define_prop_chr, define_properties, device_class};
 
+#[cfg(not(test))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop {}
 }
+
+#[cfg(not(test))]
+#[no_mangle]
+pub extern "C" fn rust_eh_personality() {}
 
 /* ── Common MMIO Helpers ─────────────────────────────────────────────────── */
 
@@ -52,36 +56,21 @@ unsafe extern "C" fn dummy_write(_opaque: *mut c_void, _addr: u64, _val: u64, _s
 
 #[repr(C)]
 pub struct SPIEcho {
-    pub parent: SSIPeripheral,
-    pub mr: MemoryRegion,
+    pub parent_obj: SSIPeripheral,
+}
+
+unsafe extern "C" fn spi_echo_realize(_dev: *mut SSIPeripheral, _errp: *mut *mut c_void) {
+    // Nothing to do for realization
 }
 
 unsafe extern "C" fn spi_echo_transfer(_dev: *mut SSIPeripheral, val: u32) -> u32 {
     val
 }
 
-unsafe extern "C" fn spi_echo_realize(dev: *mut c_void, _errp: *mut *mut c_void) {
-    let s = &mut *(dev as *mut SPIEcho);
-    // Even if it is an SSIPeripheral, we can give it an MMIO region if we want to
-    // test it being instantiated by arm-generic-fdt which expects MMIO.
-    virtmcu_qom::memory::memory_region_init_io(
-        &mut s.mr,
-        dev as *mut _,
-        &DUMMY_OPS,
-        dev as *mut _,
-        c"spi-echo-mmio".as_ptr(),
-        0x1000,
-    );
-    // Wait! SSIPeripheral is NOT a SysBusDevice, so we can't use sysbus_init_mmio
-    // UNLESS we inherit from SysBusDevice.
-}
-
 unsafe extern "C" fn spi_echo_class_init(klass: *mut ObjectClass, _data: *const c_void) {
-    let spc = ssi_peripheral_class!(klass);
-    (*spc).transfer = Some(spi_echo_transfer);
-
-    let dc = device_class!(klass);
-    (*dc).realize = Some(spi_echo_realize);
+    let ssc = klass as *mut SSIPeripheralClass;
+    (*ssc).realize = Some(spi_echo_realize);
+    (*ssc).transfer = Some(spi_echo_transfer);
 }
 
 static SPI_ECHO_TYPE_INFO: TypeInfo = TypeInfo {
@@ -117,23 +106,23 @@ unsafe extern "C" fn uart_echo_can_receive(_opaque: *mut c_void) -> c_int {
 
 unsafe extern "C" fn uart_echo_receive(opaque: *mut c_void, buf: *const u8, size: c_int) {
     let s = &mut *(opaque as *mut UARTEcho);
-    virtmcu_qom::chardev::qemu_chr_fe_write(&mut s.chr, buf, size);
+    virtmcu_qom::chardev::qemu_chr_fe_write(&raw mut s.chr, buf, size);
 }
 
 unsafe extern "C" fn uart_echo_realize(dev: *mut c_void, _errp: *mut *mut c_void) {
     let s = &mut *(dev as *mut UARTEcho);
     virtmcu_qom::memory::memory_region_init_io(
-        &mut s.mr,
+        &raw mut s.mr,
         dev as *mut _,
-        &DUMMY_OPS,
+        &raw const DUMMY_OPS,
         dev as *mut _,
         c"uart-echo-mmio".as_ptr(),
         0x1000,
     );
-    virtmcu_qom::qdev::sysbus_init_mmio(dev as *mut _, &mut s.mr);
+    virtmcu_qom::qdev::sysbus_init_mmio(dev as *mut _, &raw mut s.mr);
 
     virtmcu_qom::chardev::qemu_chr_fe_set_handlers(
-        &mut s.chr,
+        &raw mut s.chr,
         Some(uart_echo_can_receive),
         Some(uart_echo_receive),
         None,
@@ -144,10 +133,7 @@ unsafe extern "C" fn uart_echo_realize(dev: *mut c_void, _errp: *mut *mut c_void
     );
 }
 
-define_properties!(
-    UART_ECHO_PROPS,
-    [define_prop_chr!(c"chardev".as_ptr(), UARTEcho, chr),]
-);
+define_properties!(UART_ECHO_PROPS, [define_prop_chr!(c"chardev".as_ptr(), UARTEcho, chr),]);
 
 unsafe extern "C" fn uart_echo_class_init(klass: *mut ObjectClass, _data: *const c_void) {
     let dc = device_class!(klass);
@@ -178,6 +164,7 @@ declare_device_type!(uart_echo_init, UART_ECHO_TYPE_INFO);
 #[repr(C)]
 pub struct TestRustDevice {
     pub parent: SysBusDevice,
+    pub mac: MACAddr,
     pub mr: MemoryRegion,
 }
 
@@ -217,19 +204,26 @@ unsafe extern "C" fn test_rust_realize(dev: *mut c_void, _errp: *mut *mut c_void
 
     let s = &mut *(dev as *mut TestRustDevice);
     virtmcu_qom::memory::memory_region_init_io(
-        &mut s.mr,
+        &raw mut s.mr,
         dev as *mut _,
-        &DUMMY_OPS,
+        &raw const DUMMY_OPS,
         dev as *mut _,
         c"test-rust-mmio".as_ptr(),
         0x1000,
     );
-    virtmcu_qom::qdev::sysbus_init_mmio(dev as *mut _, &mut s.mr);
+    virtmcu_qom::qdev::sysbus_init_mmio(dev as *mut _, &raw mut s.mr);
 }
 
+static mut TEST_PROPERTIES: [virtmcu_qom::qom::Property; 2] =
+    [virtmcu_qom::define_prop_macaddr!(c"macaddr".as_ptr(), TestRustDevice, mac), unsafe {
+        core::mem::zeroed()
+    }];
+
+#[allow(static_mut_refs)]
 unsafe extern "C" fn test_class_init(klass: *mut ObjectClass, _data: *const c_void) {
     let dc = device_class!(klass);
     (*dc).realize = Some(test_rust_realize);
+    virtmcu_qom::qdev::device_class_set_props_n(dc, TEST_PROPERTIES.as_ptr(), 1);
 }
 
 static TEST_TYPE_INFO: TypeInfo = TypeInfo {

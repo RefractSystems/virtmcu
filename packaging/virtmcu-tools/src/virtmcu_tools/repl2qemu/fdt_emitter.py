@@ -1,7 +1,6 @@
-import os
 import subprocess
 import sys
-from typing import Dict, Tuple
+from pathlib import Path
 
 from .parser import ReplPlatform
 
@@ -38,7 +37,7 @@ class FdtEmitter:
     def __init__(self, platform: ReplPlatform):
         self.platform = platform
         self.arch = self._detect_arch()
-        self.phandles: Dict[str, int] = {}
+        self.phandles: dict[str, int] = {}
         self.next_phandle = 1
         self._assign_phandles()
 
@@ -61,7 +60,7 @@ class FdtEmitter:
     def _get_phandle(self, name: str) -> int:
         return self.phandles.get(name, 0)
 
-    def _parse_addr(self, addr_str: str) -> Tuple[int, int]:
+    def _parse_addr(self, addr_str: str) -> tuple[int, int]:
         """Parses address string '0x60000000' or '<0x40011000, +0x100>'."""
         if not addr_str or addr_str.lower() == "none" or not any(c.isdigit() for c in addr_str):
             return 0, 0
@@ -75,11 +74,10 @@ class FdtEmitter:
                 size_part = size_part[1:]
             size = int(size_part, 16)
             return base, size
-        else:
-            try:
-                return int(addr_str, 16), 0
-            except ValueError:
-                return 0, 0
+        try:
+            return int(addr_str, 16), 0
+        except ValueError:
+            return 0, 0
 
     def generate_dts(self) -> str:
         lines = []
@@ -243,7 +241,7 @@ def compile_dtb(dts_content: str, out_path: str) -> bool:
     """Compiles the DTS string into a DTB file using dtc."""
     dts_path = out_path + ".dts"
     try:
-        with open(dts_path, "w") as f:
+        with Path(dts_path).open("w") as f:
             f.write(dts_content)
         subprocess.run(["dtc", "-I", "dts", "-O", "dtb", "-o", out_path, dts_path], check=True, capture_output=True)
         return True
@@ -251,5 +249,5 @@ def compile_dtb(dts_content: str, out_path: str) -> bool:
         print(f"Error compiling DTB: {e.stderr.decode()}", file=sys.stderr)
         return False
     finally:
-        if os.path.exists(dts_path):
-            os.unlink(dts_path)
+        if Path(dts_path).exists():
+            Path(dts_path).unlink()

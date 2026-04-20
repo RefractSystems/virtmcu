@@ -84,7 +84,8 @@ extern "C" fn telemetry_irq_cb(opaque: *mut c_void, n: c_int, level: c_int) {
         let backend = &*s.rust_state;
 
         let slot_info = {
-            let mut slots = backend.irq_slots.lock().unwrap();
+            let mut slots =
+                backend.irq_slots.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut found_slot = None;
             for slot in slots.iter() {
                 if slot.opaque == opaque {
@@ -95,11 +96,7 @@ extern "C" fn telemetry_irq_cb(opaque: *mut c_void, n: c_int, level: c_int) {
 
             if found_slot.is_none() && slots.len() < 64 {
                 let new_slot = slots.len() as u16;
-                slots.push(IrqSlot {
-                    opaque,
-                    slot: new_slot,
-                    path: ptr::null_mut(),
-                });
+                slots.push(IrqSlot { opaque, slot: new_slot, path: ptr::null_mut() });
                 found_slot = Some((new_slot, ptr::null_mut()));
             }
             found_slot
@@ -115,7 +112,7 @@ unsafe extern "C" fn cache_irq_paths_cb(obj: *mut Object, _opaque: *mut c_void) 
     if !object_dynamic_cast(obj, TYPE_DEVICE).is_null() {
         let s = &*GLOBAL_TELEMETRY;
         let backend = &*s.rust_state;
-        let mut slots = backend.irq_slots.lock().unwrap();
+        let mut slots = backend.irq_slots.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let len = slots.len();
         if len < 64 {
             slots.push(IrqSlot {
@@ -133,18 +130,11 @@ unsafe extern "C" fn zenoh_telemetry_realize(dev: *mut c_void, errp: *mut *mut c
 
     assert!(virtmcu_bql_locked());
 
-    let router_ptr = if s.router.is_null() {
-        ptr::null()
-    } else {
-        s.router as *const c_char
-    };
+    let router_ptr = if s.router.is_null() { ptr::null() } else { s.router.cast_const() };
 
     s.rust_state = zenoh_telemetry_init_internal(s.node_id, router_ptr);
     if s.rust_state.is_null() {
-        error_setg!(
-            errp as *mut *mut Error,
-            c"zenoh-telemetry: failed to initialize Rust backend".as_ptr()
-        );
+        error_setg!(errp, "zenoh-telemetry: failed to initialize Rust backend");
         return;
     }
 
@@ -163,7 +153,7 @@ unsafe extern "C" fn zenoh_telemetry_realize(dev: *mut c_void, errp: *mut *mut c
 unsafe extern "C" fn zenoh_telemetry_instance_finalize(obj: *mut Object) {
     let s = &mut *(obj as *mut ZenohTelemetryQOM);
 
-    if s as *mut ZenohTelemetryQOM == GLOBAL_TELEMETRY {
+    if std::ptr::from_mut::<ZenohTelemetryQOM>(s) == GLOBAL_TELEMETRY {
         unsafe {
             virtmcu_cpu_halt_hook = None;
             virtmcu_irq_hook = None;
@@ -175,7 +165,7 @@ unsafe extern "C" fn zenoh_telemetry_instance_finalize(obj: *mut Object) {
         let backend = Box::from_raw(s.rust_state);
         let _ = backend.sender.send(None);
 
-        let slots = backend.irq_slots.lock().unwrap();
+        let slots = backend.irq_slots.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         for slot in slots.iter() {
             if !slot.path.is_null() {
                 libc::free(slot.path as *mut c_void);
@@ -230,17 +220,14 @@ fn zenoh_telemetry_init_internal(
         match virtmcu_zenoh::open_session(router) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!(
-                    "[zenoh-telemetry] node={}: FAILED to open Zenoh session: {}",
-                    node_id, e
-                );
+                eprintln!("[zenoh-telemetry] node={node_id}: FAILED to open Zenoh session: {e}");
                 return ptr::null_mut();
             }
         }
     };
 
     let (tx, rx) = bounded(1024);
-    let topic = format!("sim/telemetry/trace/{}", node_id);
+    let topic = format!("sim/telemetry/trace/{node_id}");
     let sess_clone = session.clone();
 
     std::thread::spawn(move || {
@@ -275,7 +262,7 @@ fn zenoh_telemetry_trace_cpu_internal(
         timestamp_ns: vtime as u64,
         event_type: 0,
         id: cpu_index as u32,
-        value: if halted { 1 } else { 0 },
+        value: u32::from(halted),
         device_name: None,
     }));
 }
@@ -287,7 +274,7 @@ fn zenoh_telemetry_trace_irq_internal(
     level: i32,
     name_ptr: *const c_char,
 ) {
-    let id = ((slot as u32) << 16) | (pin as u32);
+    let id = (u32::from(slot) << 16) | u32::from(pin);
     let vtime = unsafe { qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) };
 
     let device_name = if name_ptr.is_null() {
@@ -336,4 +323,18 @@ fn telemetry_worker(rx: Receiver<Option<TraceEvent>>, session: Session, topic: S
         let _ = publisher.put(buf).wait();
     }
 }
-// force rebuild
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_zenoh_telemetry_qom_layout() {
+        // QOM layout validation
+        assert_eq!(
+            core::mem::offset_of!(ZenohTelemetryQOM, parent_obj),
+            0,
+            "SysBusDevice must be the first field"
+        );
+    }
+}

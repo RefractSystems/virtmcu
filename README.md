@@ -95,7 +95,8 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full technical deep-d
   OpenUSD-aligned `.yaml` board descriptions into Device Tree blobs and QEMU CLI strings.
 
 - **Unified Test Automation**: pytest + `qemu.qmp` for primary test suites; a Robot
-  Framework compatibility layer for Renode `.robot` suite migration.
+  Framework compatibility layer for Renode `.robot` suite migration. Tests run in parallel
+  by default to ensure rapid feedback.
 
 ---
 
@@ -107,31 +108,30 @@ virtmcu/
 ├── CONTRIBUTING.md             # Dev workflow, code style, setup
 │
 ├── hw/                         # C/Rust QOM peripheral models (no Python in sim loop)
-│   ├── dummy/dummy.c           # Minimal QOM SysBusDevice — start here (C)
-│   ├── rust-dummy/             # Minimal QOM SysBusDevice — start here (Rust FFI)
-│   ├── misc/
-│   │   └── mmio-socket-bridge.c # Legacy custom socket bridge
+│   ├── misc/                   # Legacy C models (like mmio-socket-bridge.c)
 │   ├── remote-port/            # AMD/Xilinx Remote Port QOM bridge for SystemC/Verilator
-│   ├── zenoh/                  # Native Zenoh QOM plugin
-│   │   ├── zenoh-clock.c       # TCG cooperative halt + Zenoh clock sync
-│   │   ├── zenoh-netdev.c      # Deterministic multi-node Ethernet backend
-│   │   └── zenoh-chardev.c     # Deterministic multi-node UART backend
+│   ├── rust/                   # All native Rust plugins and bridges
+│   │   ├── rust-dummy/         # Minimal Rust QOM SysBusDevice — start here
+│   │   ├── zenoh-clock/        # TCG cooperative halt + Zenoh clock sync
+│   │   ├── zenoh-netdev/       # Deterministic multi-node Ethernet backend
+│   │   └── zenoh-chardev/      # Deterministic multi-node UART backend
 │   └── meson.build             # Integrates hw/ into QEMU's module build
 │
-├── tools/
-│   ├── repl2qemu/              # .repl / .yaml → Device Tree + QEMU CLI (offline)
-│   ├── systemc_adapter/        # C++ SystemC TLM-2.0 ↔ Remote Port / Custom Socket bridge
+├── tools/                      # Assorted offline utilities and debugging helpers
+│   ├── yaml2qemu.py            # .yaml → Device Tree + QEMU CLI transpiler
 │   ├── cyber_bridge/           # C++ SAL/AAL telemetry and MuJoCo shm synchronization
-│   ├── zenoh_coordinator/      # Rust daemon for strictly ordering multi-node frames
-│   └── testing/
-│       ├── qemu_keywords.robot # Robot Framework compatibility layer
-│       ├── test_qmp.py         # pytest primary test suite
-│       └── qmp_bridge.py       # Async QMP helper
+│   ├── debug/                  # Python GDB helpers for interactive debugging
+│   └── zenoh_coordinator/      # Rust daemon for strictly ordering multi-node frames
+│
+├── tests/                      # pytest / Robot test suites
+│   ├── conftest.py             # pytest fixtures for Zenoh and QEMU orchestration
+│   ├── test_qmp_keywords.robot # Robot Framework integration
+│   └── ...                     # Extensive coverage tests (phase1, phase2, etc.)
 │
 ├── patches/
-│   ├── arm-generic-fdt-v3.mbx  # 33-patch series (apply with git am)
+│   ├── arm-generic-fdt-v3.mbx  # 33-patch series (applied by setup-qemu.sh)
 │   ├── apply_zenoh_hook.py     # Injects virtmcu_tcg_quantum_hook into cpu-exec.c
-│   └── apply_zenoh_netdev.py   # Injects Zenoh netdev backend registration
+│   └── ...
 │
 ├── scripts/
 │   ├── setup-qemu.sh           # Clone QEMU, apply patches, symlink hw/, build
@@ -158,7 +158,7 @@ covers the timing design and BQL constraints. Section 6 covers prior art (qbox, 
 
 **For a deep dive on clock modes and BQL mechanics**: [`docs/TIME_MANAGEMENT_DESIGN.md`](docs/TIME_MANAGEMENT_DESIGN.md).
 
-**Write a new peripheral**: Copy `hw/dummy/dummy.c`. Rename, implement MMIO ops, add an
+**Write a new peripheral**: Navigate to `hw/rust/rust-dummy/` as a template. Rename, implement MMIO ops, and add an
 entry in `hw/meson.build`. Run `make build` then:
 ```bash
 ./scripts/run.sh --dtb test/phase1/minimal.dtb -device your-device-name -nographic
@@ -209,11 +209,10 @@ sudo apt install build-essential libglib2.0-dev ninja-build \
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # All platforms
-git submodule update --init --recursive   # fetch QEMU source
-make setup-initial # apply patches, build QEMU (~10 min first run)
-make venv         # synchronize Python environment with uv
+make setup-initial # clones QEMU, applies patches, and builds (~10 min first run)
+make venv          # synchronize Python environment with uv
 source .venv/bin/activate
-make run          # smoke-test
+make run           # smoke-test
 ```
 
 > **macOS note**: Native builds work for Phases 1–3. Phase 4+ requires Docker — a

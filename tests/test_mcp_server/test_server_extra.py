@@ -100,7 +100,8 @@ async def test_read_resource_status(server):
 
     handler = server.request_handlers[types.ReadResourceRequest]
     req = types.ReadResourceRequest(
-        method="resources/read", params=types.ReadResourceRequestParams(uri="virtmcu://simulation/status")
+        method="resources/read",
+        params=types.ReadResourceRequestParams(uri="virtmcu://simulation/status"),  # type: ignore[arg-type]
     )
     res = await handler(req)
     status = json.loads(res.root.contents[0].text)
@@ -111,18 +112,17 @@ async def test_read_resource_status(server):
 @pytest.mark.asyncio
 async def test_call_tool_flash_firmware(server):
     node_id = "flash_node"
-    with patch("os.path.exists", return_value=True):
-        with patch("os.path.isabs", return_value=True):
-            handler = server.request_handlers[types.CallToolRequest]
-            req = types.CallToolRequest(
-                method="tools/call",
-                params=types.CallToolRequestParams(
-                    name="flash_firmware", arguments={"node_id": node_id, "firmware_path": "/tmp/test.elf"}
-                ),
-            )
-            res = await handler(req)
-            assert "associated with node" in res.root.content[0].text
-            assert server.node_manager.get_node(node_id).firmware_path == "/tmp/test.elf"
+    with patch("pathlib.Path.exists", return_value=True), patch("pathlib.Path.is_absolute", return_value=True):
+        handler = server.request_handlers[types.CallToolRequest]
+        req = types.CallToolRequest(
+            method="tools/call",
+            params=types.CallToolRequestParams(
+                name="flash_firmware", arguments={"node_id": node_id, "firmware_path": "/tmp/test.elf"}
+            ),
+        )
+        res = await handler(req)
+        assert "associated with node" in res.root.content[0].text
+        assert server.node_manager.get_node(node_id).firmware_path == "/tmp/test.elf"
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,6 @@
 import logging
 import os
+from pathlib import Path
 
 from mcp.server import Server
 from mcp.types import (
@@ -189,7 +190,7 @@ def create_mcp_server() -> Server:
                 )
                 return [TextContent(type="text", text=f"Board provisioned for node {node_id}.")]
 
-            elif name == "flash_firmware":
+            if name == "flash_firmware":
                 node_id = arguments["node_id"]
                 server.node_manager.flash_firmware(node_id, arguments["firmware_path"])
                 return [
@@ -198,37 +199,37 @@ def create_mcp_server() -> Server:
                     )
                 ]
 
-            elif name == "start_node":
+            if name == "start_node":
                 node_id = arguments["node_id"]
                 await server.node_manager.start_node(node_id)
                 return [TextContent(type="text", text=f"Node {node_id} started.")]
 
-            elif name == "stop_node":
+            if name == "stop_node":
                 node_id = arguments["node_id"]
                 await server.node_manager.stop_node(node_id)
                 return [TextContent(type="text", text=f"Node {node_id} stopped.")]
 
-            elif name == "pause_node":
+            if name == "pause_node":
                 node = server.node_manager.get_node(arguments["node_id"])
                 await node.qmp_bridge.pause_emulation()
                 return [TextContent(type="text", text=f"Node {arguments['node_id']} paused.")]
 
-            elif name == "resume_node":
+            if name == "resume_node":
                 node = server.node_manager.get_node(arguments["node_id"])
                 await node.qmp_bridge.start_emulation()
                 return [TextContent(type="text", text=f"Node {arguments['node_id']} resumed.")]
 
-            elif name == "read_cpu_state":
+            if name == "read_cpu_state":
                 node = server.node_manager.get_node(arguments["node_id"])
                 hmp_res = await node.qmp_bridge.execute("human-monitor-command", {"command-line": "info registers"})
                 return [TextContent(type="text", text=hmp_res)]
 
-            elif name == "read_memory":
+            if name == "read_memory":
                 node = server.node_manager.get_node(arguments["node_id"])
                 addr = arguments["address"]
                 size = arguments["size"]
                 if size > 1024 * 1024:  # 1MB limit for safety
-                     return [TextContent(type="text", text="Error: Memory read size too large (max 1MB)")]
+                    return [TextContent(type="text", text="Error: Memory read size too large (max 1MB)")]
 
                 # pmemsave saves to a file, so we do it via QMP then read it
                 import tempfile
@@ -237,12 +238,12 @@ def create_mcp_server() -> Server:
                 os.close(fd)
                 try:
                     await node.qmp_bridge.execute("pmemsave", {"val": addr, "size": size, "filename": tmp_path})
-                    with open(tmp_path, "rb") as f:
+                    with Path(tmp_path).open("rb") as f:
                         data = f.read()
                     hex_data = data.hex()
                     return [TextContent(type="text", text=f"Memory at {hex(addr)} ({size} bytes):\n{hex_data}")]
                 finally:
-                    os.remove(tmp_path)
+                    Path(tmp_path).unlink()
 
             elif name == "disassemble":
                 node = server.node_manager.get_node(arguments["node_id"])
@@ -297,8 +298,8 @@ def create_mcp_server() -> Server:
         except (Exception, BaseException) as e:
             logger.error(f"Error executing tool {name}: {e}")
             from mcp.types import CallToolResult
-            return CallToolResult(content=[TextContent(type="text", text=f"Error: {str(e)}")], isError=True)
 
+            return CallToolResult(content=[TextContent(type="text", text=f"Error: {e!s}")], isError=True)
 
     @server.list_resources()
     async def handle_list_resources() -> list[Resource]:

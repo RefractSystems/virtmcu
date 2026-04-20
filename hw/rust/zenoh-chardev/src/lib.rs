@@ -136,10 +136,7 @@ unsafe extern "C" fn zenoh_chr_parse(
     let topic = qemu_opt_get(opts, c"topic".as_ptr());
 
     if node.is_null() {
-        error_setg!(
-            errp as *mut *mut Error,
-            c"chardev: zenoh: 'node' is required".as_ptr()
-        );
+        error_setg!(errp, "chardev: zenoh: 'node' is required");
         return;
     }
 
@@ -173,11 +170,7 @@ unsafe extern "C" fn zenoh_chr_open(
     let opts = b.u.data as *mut ChardevZenohOptions;
 
     let node = CStr::from_ptr((*opts).node).to_string_lossy().into_owned();
-    let router = if (*opts).router.is_null() {
-        ptr::null()
-    } else {
-        (*opts).router as *const c_char
-    };
+    let router = if (*opts).router.is_null() { ptr::null() } else { (*opts).router.cast_const() };
     let topic = if (*opts).topic.is_null() {
         "sim/chardev".to_string()
     } else {
@@ -188,11 +181,7 @@ unsafe extern "C" fn zenoh_chr_open(
     s.rust_state = zenoh_chardev_init_internal(chr, node, router, topic);
     if s.rust_state.is_null() {
         vlog!("[zenoh-chardev] zenoh_chardev_init_internal returned NULL\n");
-        error_setg!(
-            errp as *mut *mut Error,
-            c"zenoh-chardev: failed to initialize Rust backend".as_ptr()
-        );
-        return false;
+        error_setg!(errp, "zenoh-chardev: failed to initialize Rust backend");
     }
     vlog!("[zenoh-chardev] zenoh_chr_open success\n");
     true
@@ -216,10 +205,7 @@ unsafe extern "C" fn char_zenoh_class_init(klass: *mut ObjectClass, _data: *cons
     cc.chr_parse = Some(zenoh_chr_parse);
     cc.chr_open = Some(zenoh_chr_open);
     cc.chr_write = Some(zenoh_chr_write);
-    vlog!(
-        "[zenoh-chardev] chr_open is now set to {:p}\n",
-        zenoh_chr_open as *const ()
-    );
+    vlog!("[zenoh-chardev] chr_open is now set to {:p}\n", zenoh_chr_open as *const ());
 }
 
 static CHAR_ZENOH_TYPE_INFO: TypeInfo = TypeInfo {
@@ -250,7 +236,7 @@ extern "C" fn rx_timer_cb(opaque: *mut core::ffi::c_void) {
     let state = unsafe { &*(opaque as *mut ZenohChardevState) };
     let now = unsafe { qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) } as u64;
 
-    let mut heap = state.local_heap.lock().unwrap_or_else(|p| p.into_inner());
+    let mut heap = state.local_heap.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
 
     // Drain MPSC channel into the priority queue (bounded by MAX_HEAP_PACKETS).
     while let Ok(packet) = state.rx_receiver.try_recv() {
@@ -272,7 +258,7 @@ extern "C" fn rx_timer_cb(opaque: *mut core::ffi::c_void) {
             let can_write = qemu_chr_be_can_write(state.chr) as usize;
 
             if can_write > 0 {
-                let mut packet = heap.pop().unwrap();
+                let mut packet = heap.pop().unwrap_or_else(|| std::process::abort());
                 let to_write = std::cmp::min(can_write, packet.data.len());
                 qemu_chr_be_write(state.chr, packet.data.as_ptr(), to_write);
                 if to_write < packet.data.len() {
@@ -288,9 +274,7 @@ extern "C" fn rx_timer_cb(opaque: *mut core::ffi::c_void) {
         if retry_later {
             // UART is congested, wait ~10us virtual time before trying again
             let retry_vtime = now + 10_000;
-            state
-                .earliest_vtime
-                .store(retry_vtime, AtomicOrdering::Release);
+            state.earliest_vtime.store(retry_vtime, AtomicOrdering::Release);
             unsafe {
                 virtmcu_timer_mod(state.rx_timer, retry_vtime as i64);
             }
@@ -299,16 +283,12 @@ extern "C" fn rx_timer_cb(opaque: *mut core::ffi::c_void) {
     }
 
     if let Some(next_packet) = heap.peek() {
-        state
-            .earliest_vtime
-            .store(next_packet.vtime, AtomicOrdering::Release);
+        state.earliest_vtime.store(next_packet.vtime, AtomicOrdering::Release);
         unsafe {
             virtmcu_timer_mod(state.rx_timer, next_packet.vtime as i64);
         }
     } else {
-        state
-            .earliest_vtime
-            .store(u64::MAX, AtomicOrdering::Release);
+        state.earliest_vtime.store(u64::MAX, AtomicOrdering::Release);
     }
 }
 
@@ -328,17 +308,17 @@ fn zenoh_chardev_init_internal(
     let (tx, rx) = unbounded(); // RX packet channel (subscriber → rx_timer_cb)
     let local_heap = Mutex::new(BinaryHeap::new());
     let earliest_vtime = Arc::new(AtomicU64::new(u64::MAX));
-    let earliest_clone = earliest_vtime.clone();
+    let earliest_clone = std::sync::Arc::clone(&earliest_vtime);
     let rx_overflow = Arc::new(AtomicUsize::new(0));
 
     let timer_ptr_clone = Arc::new(AtomicUsize::new(0));
-    let timer_ptr = timer_ptr_clone.clone();
+    let timer_ptr = std::sync::Arc::clone(&timer_ptr_clone);
 
     // TX background publisher: drains tx_pub_recv and calls session.put() outside BQL,
     // preventing the QEMU main thread from blocking inside zenoh_chr_write.
     let (tx_pub_send, tx_pub_recv) = unbounded::<Vec<u8>>();
     let tx_session = session.clone();
-    let tx_topic_bg = format!("{}/{}/tx", topic, node_id);
+    let tx_topic_bg = format!("{topic}/{node_id}/tx");
     std::thread::Builder::new()
         .name("zenoh-chardev-tx".into())
         .spawn(move || {
@@ -346,9 +326,9 @@ fn zenoh_chardev_init_internal(
                 let _ = tx_session.put(&tx_topic_bg, data).wait();
             }
         })
-        .expect("failed to spawn zenoh-chardev TX thread");
+        .unwrap_or_else(|_| std::process::abort()); // "failed to spawn zenoh-chardev TX thread");
 
-    let rx_topic = format!("{}/{}/rx", topic, node_id);
+    let rx_topic = format!("{topic}/{node_id}/rx");
 
     let subscriber = session
         .declare_subscriber(&rx_topic)
@@ -363,24 +343,18 @@ fn zenoh_chardev_init_internal(
             if data.len() < 12 {
                 // Malformed: payload is shorter than ZenohFrameHeader (12 bytes).
                 // Discard and log; do not silently deliver at vtime=0.
-                vlog!(
-                    "[zenoh-chardev] discarding malformed RX packet: len={} < 12\n",
-                    data.len()
-                );
+                vlog!("[zenoh-chardev] discarding malformed RX packet: len={} < 12\n", data.len());
                 return;
             }
 
             let mut header = ZenohFrameHeader::default();
             unsafe {
-                std::ptr::copy_nonoverlapping(data.as_ptr(), &mut header as *mut _ as *mut u8, 12);
+                std::ptr::copy_nonoverlapping(data.as_ptr(), &raw mut header as *mut u8, 12);
             }
 
             let payload = data[12..].to_vec();
 
-            let packet = OrderedPacket {
-                vtime: header.delivery_vtime_ns,
-                data: payload,
-            };
+            let packet = OrderedPacket { vtime: header.delivery_vtime_ns, data: payload };
 
             let _ = tx.send(packet);
 
@@ -410,7 +384,7 @@ fn zenoh_chardev_init_internal(
         tx_sender: tx_pub_send,
     });
 
-    let state_ptr = &mut *state as *mut ZenohChardevState;
+    let state_ptr = &raw mut *state;
     let rx_timer =
         unsafe { virtmcu_timer_new_ns(QEMU_CLOCK_VIRTUAL, rx_timer_cb, state_ptr as *mut c_void) };
 
@@ -431,16 +405,13 @@ fn zenoh_chardev_write_internal(state: &ZenohChardevState, buf: *const u8, len: 
 
     let now = unsafe { qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) } as u64;
 
-    let header = ZenohFrameHeader {
-        delivery_vtime_ns: now,
-        size: len as u32,
-    };
+    let header = ZenohFrameHeader { delivery_vtime_ns: now, size: len as u32 };
 
     let mut data = Vec::with_capacity(12 + len);
     let mut header_bytes = [0u8; 12];
     unsafe {
         std::ptr::copy_nonoverlapping(
-            &header as *const _ as *const u8,
+            &raw const header as *const u8,
             header_bytes.as_mut_ptr(),
             12,
         );
@@ -452,4 +423,33 @@ fn zenoh_chardev_write_internal(state: &ZenohChardevState, buf: *const u8, len: 
     // thread (BQL held) inside session.put().wait() for every echoed byte.
     let _ = state.tx_sender.send(data);
     len
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BinaryHeap;
+
+    #[test]
+    fn test_ordered_packet_ord() {
+        let mut heap = BinaryHeap::new();
+        heap.push(OrderedPacket { vtime: 1000, data: vec![1] });
+        heap.push(OrderedPacket { vtime: 500, data: vec![2] });
+        heap.push(OrderedPacket { vtime: 2000, data: vec![3] });
+
+        // Lowest vtime (500) should pop first
+        assert_eq!(heap.pop().unwrap_or_else(|| std::process::abort()).vtime, 500);
+        assert_eq!(heap.pop().unwrap_or_else(|| std::process::abort()).vtime, 1000);
+        assert_eq!(heap.pop().unwrap_or_else(|| std::process::abort()).vtime, 2000);
+    }
+
+    #[test]
+    fn test_chardev_zenoh_layout() {
+        // Ensure QOM layout
+        assert_eq!(
+            core::mem::offset_of!(ChardevZenoh, parent),
+            0,
+            "Chardev must be the first field in ChardevZenoh"
+        );
+    }
 }

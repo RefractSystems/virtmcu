@@ -1,14 +1,14 @@
-import os
 import sys
 import time
+from pathlib import Path
 
 import zenoh
 from vproto import ClockAdvanceReq, ClockReadyResp
 
 # Add tools/ to path
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-WORKSPACE_DIR = os.path.dirname(os.path.dirname(SCRIPT_DIR))
-sys.path.append(os.path.join(WORKSPACE_DIR, "tools"))
+SCRIPT_DIR = Path(Path(__file__).resolve().parent)
+WORKSPACE_DIR = Path(Path(SCRIPT_DIR).parent.parent)
+sys.path.append(str(Path(WORKSPACE_DIR) / "tools"))
 
 
 def main():
@@ -36,8 +36,9 @@ def main():
             else:
                 print(f"Error reply: {reply.err}")
 
-    print(f"Query took {end-start:.3f}s")
+    print(f"Query took {end - start:.3f}s")
     session.close()
+
 
 if __name__ == "__main__":
     main()

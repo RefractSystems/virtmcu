@@ -160,11 +160,7 @@ static ZENOH_802154_OPS: MemoryRegionOps = MemoryRegionOps {
 unsafe extern "C" fn zenoh_802154_realize(dev: *mut c_void, errp: *mut *mut c_void) {
     let s = &mut *(dev as *mut Zenoh802154QEMU);
 
-    let router_ptr = if s.router.is_null() {
-        ptr::null()
-    } else {
-        s.router as *const c_char
-    };
+    let router_ptr = if s.router.is_null() { ptr::null() } else { s.router.cast_const() };
 
     let topic = if s.topic.is_null() {
         None
@@ -174,10 +170,7 @@ unsafe extern "C" fn zenoh_802154_realize(dev: *mut c_void, errp: *mut *mut c_vo
 
     s.rust_state = zenoh_802154_init_internal(s.irq, s.node_id, router_ptr, topic);
     if s.rust_state.is_null() {
-        error_setg!(
-            errp as *mut *mut Error,
-            c"Failed to initialize Rust Zenoh 802.15.4".as_ptr()
-        );
+        error_setg!(errp, "Failed to initialize Rust Zenoh 802.15.4");
         return;
     }
 }
@@ -194,15 +187,15 @@ unsafe extern "C" fn zenoh_802154_instance_init(obj: *mut Object) {
     let s = &mut *(obj as *mut Zenoh802154QEMU);
 
     memory_region_init_io(
-        &mut s.iomem,
+        &raw mut s.iomem,
         obj,
-        &ZENOH_802154_OPS,
+        &raw const ZENOH_802154_OPS,
         obj as *mut c_void,
         c"zenoh-802154".as_ptr(),
         0x100,
     );
-    sysbus_init_mmio(obj as *mut SysBusDevice, &mut s.iomem);
-    sysbus_init_irq(obj as *mut SysBusDevice, &mut s.irq);
+    sysbus_init_mmio(obj as *mut SysBusDevice, &raw mut s.iomem);
+    sysbus_init_irq(obj as *mut SysBusDevice, &raw mut s.irq);
 }
 
 define_properties!(
@@ -252,10 +245,7 @@ fn zenoh_802154_init_internal(
     let session = match unsafe { virtmcu_zenoh::open_session(router) } {
         Ok(s) => s,
         Err(e) => {
-            eprintln!(
-                "[zenoh-802154] node={}: FAILED to open Zenoh session: {}",
-                node_id, e
-            );
+            eprintln!("[zenoh-802154] node={node_id}: FAILED to open Zenoh session: {e}");
             return ptr::null_mut();
         }
     };
@@ -263,14 +253,15 @@ fn zenoh_802154_init_internal(
     let topic_tx;
     let topic_rx;
     if let Some(t) = topic {
-        topic_tx = format!("{}/tx", t);
-        topic_rx = format!("{}/rx", t);
+        topic_tx = format!("{t}/tx");
+        topic_rx = format!("{t}/rx");
     } else {
-        topic_tx = format!("sim/rf/802154/{}/tx", node_id);
-        topic_rx = format!("sim/rf/802154/{}/rx", node_id);
+        topic_tx = format!("sim/rf/802154/{node_id}/tx");
+        topic_rx = format!("sim/rf/802154/{node_id}/rx");
     }
 
-    let publisher = session.declare_publisher(topic_tx).wait().unwrap();
+    let publisher =
+        session.declare_publisher(topic_tx).wait().unwrap_or_else(|_| std::process::abort());
 
     // Two-phase init: allocate first for a stable address the subscriber captures,
     // then write the constructed state.
@@ -285,30 +276,18 @@ fn zenoh_802154_init_internal(
             on_rx_frame(state, sample);
         })
         .wait()
-        .unwrap();
+        .unwrap_or_else(|_| std::process::abort());
 
     let rx_timer = unsafe {
-        virtmcu_timer_new_ns(
-            QEMU_CLOCK_VIRTUAL,
-            rx_timer_cb,
-            state_ptr_raw as *mut c_void,
-        )
+        virtmcu_timer_new_ns(QEMU_CLOCK_VIRTUAL, rx_timer_cb, state_ptr_raw as *mut c_void)
     };
 
     let backoff_timer = unsafe {
-        virtmcu_timer_new_ns(
-            QEMU_CLOCK_VIRTUAL,
-            backoff_timer_cb,
-            state_ptr_raw as *mut c_void,
-        )
+        virtmcu_timer_new_ns(QEMU_CLOCK_VIRTUAL, backoff_timer_cb, state_ptr_raw as *mut c_void)
     };
 
     let ack_timer = unsafe {
-        virtmcu_timer_new_ns(
-            QEMU_CLOCK_VIRTUAL,
-            ack_timer_cb,
-            state_ptr_raw as *mut c_void,
-        )
+        virtmcu_timer_new_ns(QEMU_CLOCK_VIRTUAL, ack_timer_cb, state_ptr_raw as *mut c_void)
     };
 
     let mutex = unsafe { virtmcu_mutex_new() };
@@ -347,22 +326,22 @@ fn zenoh_802154_init_internal(
 
 fn zenoh_802154_read_internal(s: &mut Zenoh802154State, offset: u64) -> u64 {
     match offset {
-        0x04 => s.tx_len as u64,
+        0x04 => u64::from(s.tx_len),
         0x0C => {
             if (s.status & 0x01 != 0) && (s.rx_read_pos < s.rx_len) {
-                let val = s.rx_fifo[s.rx_read_pos as usize] as u64;
+                let val = u64::from(s.rx_fifo[s.rx_read_pos as usize]);
                 s.rx_read_pos += 1;
                 val
             } else {
                 0
             }
         }
-        0x10 => s.rx_len as u64,
-        0x14 => (s.status | ((s.state as u32) << 8)) as u64,
-        0x18 => (s.rx_rssi as u8) as u64,
+        0x10 => u64::from(s.rx_len),
+        0x14 => u64::from(s.status | ((s.state as u32) << 8)),
+        0x18 => u64::from(s.rx_rssi as u8),
         0x1C => s.state as u64,
-        0x20 => s.pan_id as u64,
-        0x24 => s.short_addr as u64,
+        0x20 => u64::from(s.pan_id),
+        0x24 => u64::from(s.short_addr),
         0x28 => (s.ext_addr & 0xFFFFFFFF) as u64,
         0x2C => (s.ext_addr >> 32) as u64,
         _ => 0,
@@ -457,7 +436,7 @@ fn tx_go(s: &mut Zenoh802154State) {
 fn schedule_backoff(s: &mut Zenoh802154State) {
     let max_backoff = (1u32 << s.be) - 1;
     let backoff_count = rand::random::<u32>() % (max_backoff + 1);
-    let delay_ns = backoff_count as u64 * UNIT_BACKOFF_PERIOD_NS;
+    let delay_ns = u64::from(backoff_count) * UNIT_BACKOFF_PERIOD_NS;
     let now = unsafe { qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) } as u64;
 
     unsafe {
@@ -489,9 +468,7 @@ extern "C" fn backoff_timer_cb(opaque: *mut c_void) {
     let now = unsafe { qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) } as u64;
     let busy = !s.rx_queue.is_empty() && s.rx_queue[0].delivery_vtime <= now;
 
-    if !busy {
-        tx_real(s);
-    } else {
+    if busy {
         s.nb += 1;
         if s.nb > MAC_MAX_CSMA_BACKOFFS {
             s.tx_len = 0;
@@ -504,6 +481,8 @@ extern "C" fn backoff_timer_cb(opaque: *mut c_void) {
             s.be = std::cmp::min(s.be + 1, MAC_MAX_BE);
             schedule_backoff(s);
         }
+    } else {
+        tx_real(s);
     }
 }
 
@@ -587,15 +566,9 @@ fn on_rx_frame(state: &mut Zenoh802154State, sample: zenoh::sample::Sample) {
             .rx_queue
             .binary_search_by(|probe| probe.delivery_vtime.cmp(&vtime))
             .unwrap_or_else(|e| e);
-        state.rx_queue.insert(
-            pos,
-            RxFrame {
-                delivery_vtime: vtime,
-                data: stored_data,
-                size,
-                rssi,
-            },
-        );
+        state
+            .rx_queue
+            .insert(pos, RxFrame { delivery_vtime: vtime, data: stored_data, size, rssi });
 
         unsafe {
             virtmcu_timer_mod(state.rx_timer, state.rx_queue[0].delivery_vtime as i64);
@@ -679,10 +652,7 @@ mod tests {
         let ext = 0x1122334455667788;
 
         let mut frame = vec![0x01, 0x08, 0x00, 0xFF, 0xFF, 0xFF, 0xFF];
-        assert!(
-            frame_matches_address(pan, short, ext, &frame),
-            "Broadcast should be accepted"
-        );
+        assert!(frame_matches_address(pan, short, ext, &frame), "Broadcast should be accepted");
 
         frame[5] = 0x78;
         frame[6] = 0x56;
@@ -708,10 +678,7 @@ mod tests {
         let ext = 0x0;
 
         let frame = vec![0x01, 0x08, 0x00, 0xCD, 0xAB, 0x34, 0x12];
-        assert!(
-            frame_matches_address(pan, short, ext, &frame),
-            "Exact match should be accepted"
-        );
+        assert!(frame_matches_address(pan, short, ext, &frame), "Exact match should be accepted");
 
         let frame_wrong_pan = vec![0x01, 0x08, 0x00, 0x00, 0x00, 0x34, 0x12];
         assert!(
@@ -732,25 +699,22 @@ mod tests {
         let short = 0x1234;
         let ext = 0x1122334455667788;
 
-        let frame = vec![
-            0x01, 0x0C, 0x00, 0xCD, 0xAB, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11,
-        ];
+        let frame =
+            vec![0x01, 0x0C, 0x00, 0xCD, 0xAB, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11];
         assert!(
             frame_matches_address(pan, short, ext, &frame),
             "Exact extended match should be accepted"
         );
 
-        let frame_wrong_pan = vec![
-            0x01, 0x0C, 0x00, 0x00, 0x00, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11,
-        ];
+        let frame_wrong_pan =
+            vec![0x01, 0x0C, 0x00, 0x00, 0x00, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11];
         assert!(
             !frame_matches_address(pan, short, ext, &frame_wrong_pan),
             "Wrong PAN should be rejected"
         );
 
-        let frame_wrong_addr = vec![
-            0x01, 0x0C, 0x00, 0xCD, 0xAB, 0x00, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11,
-        ];
+        let frame_wrong_addr =
+            vec![0x01, 0x0C, 0x00, 0xCD, 0xAB, 0x00, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11];
         assert!(
             !frame_matches_address(pan, short, ext, &frame_wrong_addr),
             "Wrong extended address should be rejected"
@@ -777,13 +741,21 @@ mod tests {
         let mut queue: Vec<(u64, usize)> = Vec::new();
         let frames = [(300u64, 30usize), (100u64, 10usize), (200u64, 20usize)];
         for (vt, sz) in frames {
-            let pos = queue
-                .binary_search_by(|p| p.0.cmp(&vt))
-                .unwrap_or_else(|e| e);
+            let pos = queue.binary_search_by(|p| p.0.cmp(&vt)).unwrap_or_else(|e| e);
             queue.insert(pos, (vt, sz));
         }
         assert_eq!(queue[0].0, 100);
         assert_eq!(queue[1].0, 200);
         assert_eq!(queue[2].0, 300);
+    }
+
+    #[test]
+    fn test_zenoh_802154_qemu_layout() {
+        // QOM layout validation
+        assert_eq!(
+            core::mem::offset_of!(Zenoh802154QEMU, parent_obj),
+            0,
+            "SysBusDevice must be the first field"
+        );
     }
 }

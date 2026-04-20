@@ -1,16 +1,17 @@
 import json
-import os
 import socket
 import struct
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 VIRTMCU_PROTO_MAGIC = 0x564D4355
 VIRTMCU_PROTO_VERSION = 1
 SYSC_MSG_RESP = 0
 SYSC_MSG_IRQ_SET = 1
 SYSC_MSG_IRQ_CLEAR = 2
+
 
 def run_qmp_cmd(sock_path, cmd):
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -23,10 +24,12 @@ def run_qmp_cmd(sock_path, cmd):
     resp = b""
     while b"return" not in resp:
         chunk = s.recv(4096)
-        if not chunk: break
+        if not chunk:
+            break
         resp += chunk
     s.close()
     return json.loads(resp.decode())
+
 
 def main():
     sock_path = "/tmp/stress_irq.sock"
@@ -34,7 +37,8 @@ def main():
     dtb_path = "/tmp/stress_irq.dtb"
     elf_path = "/tmp/stress_irq.elf"
 
-    if os.path.exists(sock_path): os.remove(sock_path)
+    if Path(sock_path).exists():
+        Path(sock_path).unlink()
 
     dts = f"""
 /dts-v1/;
@@ -58,23 +62,32 @@ def main():
         socket-path = "{sock_path}";
         region-size = <0x1000>;
         interrupt-parent = <&gic>;
-        interrupts = <0 0 4>; 
+        interrupts = <0 0 4>;
     }};
 }};
 """
-    with open("/tmp/stress_irq.dts", "w") as f: f.write(dts)
+    with Path("/tmp/stress_irq.dts").open("w") as f:
+        f.write(dts)
     subprocess.run(["dtc", "-I", "dts", "-O", "dtb", "-o", dtb_path, "/tmp/stress_irq.dts"])
 
     # Firmware that just spins
-    with open("/tmp/stress_irq.S", "w") as f: f.write(".global _start\n_start:\nb _start\n")
-    subprocess.run(["arm-none-eabi-gcc", "-mcpu=cortex-a15", "-nostdlib", "-Ttext=0x40000000", "/tmp/stress_irq.S", "-o", elf_path])
+    with Path("/tmp/stress_irq.S").open("w") as f:
+        f.write(".global _start\n_start:\nb _start\n")
+    subprocess.run(
+        ["arm-none-eabi-gcc", "-mcpu=cortex-a15", "-nostdlib", "-Ttext=0x40000000", "/tmp/stress_irq.S", "-o", elf_path]
+    )
 
     qemu_cmd = [
         "/workspace/third_party/qemu/build-virtmcu/install/bin/qemu-system-arm",
-        "-M", "arm-generic-fdt,hw-dtb=" + dtb_path,
-        "-kernel", elf_path,
-        "-nographic", "-monitor", "none",
-        "-qmp", f"unix:{qmp_path},server,nowait"
+        "-M",
+        "arm-generic-fdt,hw-dtb=" + dtb_path,
+        "-kernel",
+        elf_path,
+        "-nographic",
+        "-monitor",
+        "none",
+        "-qmp",
+        f"unix:{qmp_path},server,nowait",
     ]
 
     qemu_proc = subprocess.Popen(qemu_cmd)
@@ -89,7 +102,7 @@ def main():
             server.settimeout(0.1)
             conn, _ = server.accept()
             break
-        except socket.timeout:
+        except TimeoutError:
             continue
 
     if not conn:
@@ -101,18 +114,18 @@ def main():
     conn.sendall(hs)
 
     print("Starting IRQ stress test...", flush=True)
-    NUM_IRQS = 1000
+    NUM_IRQS = 1000  # noqa: N806
     start_time = time.time()
     for i in range(NUM_IRQS):
         conn.sendall(struct.pack("<IIQ", SYSC_MSG_IRQ_SET, 0, 0))
         conn.sendall(struct.pack("<IIQ", SYSC_MSG_IRQ_CLEAR, 0, 0))
         if i % 100 == 0:
-             print(f"Sent {i} IRQs...", flush=True)
-             # Periodically check QMP responsiveness
-             resp = run_qmp_cmd(qmp_path, {"execute": "query-status"})
-             if "return" not in resp:
-                 print(f"QMP unresponsive at {i} IRQs", flush=True)
-                 break
+            print(f"Sent {i} IRQs...", flush=True)
+            # Periodically check QMP responsiveness
+            resp = run_qmp_cmd(qmp_path, {"execute": "query-status"})
+            if "return" not in resp:
+                print(f"QMP unresponsive at {i} IRQs", flush=True)
+                break
         # time.sleep(0.0001) # Very small sleep to allow QEMU to breathe if needed
 
     end_time = time.time()
@@ -126,6 +139,7 @@ def main():
     conn.close()
     server.close()
     print("Stress test PASSED!")
+
 
 if __name__ == "__main__":
     main()

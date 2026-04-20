@@ -7,9 +7,9 @@
 # ==============================================================================
 
 import argparse
-import os
 import subprocess
 import sys
+from pathlib import Path
 
 import yaml
 
@@ -23,7 +23,7 @@ def parse_yaml_platform(yaml_path: str) -> tuple[ReplPlatform, dict]:
     hints_dict is reserved for future metadata (e.g. default clock rates); callers
     that don't need it can unpack with ``platform, _ = parse_yaml_platform(path)``.
     """
-    with open(yaml_path, "r") as f:
+    with Path(yaml_path).open() as f:
         data = yaml.safe_load(f)
 
     platform = ReplPlatform()
@@ -140,7 +140,7 @@ def main():
 
     args = parser.parse_args()
 
-    if not os.path.exists(args.input):
+    if not Path(args.input).exists():
         print(f"Error: Input file '{args.input}' not found.")
         sys.exit(1)
 
@@ -152,7 +152,7 @@ def main():
     emitter = FdtEmitter(platform)
     arch = emitter.arch
     if args.out_arch:
-        with open(args.out_arch, "w") as f:
+        with Path(args.out_arch).open("w") as f:
             f.write(arch)
 
     # Extract devices that require explicit CLI instantiation.
@@ -207,7 +207,7 @@ def main():
     dts = emitter.generate_dts()
 
     if args.out_cli:
-        with open(args.out_cli, "w") as f:
+        with Path(args.out_cli).open("w") as f:
             for arg in cli_args:
                 f.write(arg + "\n")
 

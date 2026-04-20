@@ -1,7 +1,7 @@
-import os
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from pathlib import Path
+from typing import Any
 
 
 @dataclass
@@ -15,14 +15,14 @@ class ReplInterrupt:
 class ReplDevice:
     name: str
     type_name: str
-    address_str: Optional[str] = None
-    properties: Dict[str, str] = field(default_factory=dict)
-    interrupts: List[ReplInterrupt] = field(default_factory=list)
+    address_str: str | None = None
+    properties: dict[str, Any] = field(default_factory=dict)
+    interrupts: list[ReplInterrupt] = field(default_factory=list)
 
 
 @dataclass
 class ReplPlatform:
-    devices: List[ReplDevice] = field(default_factory=list)
+    devices: list[ReplDevice] = field(default_factory=list)
 
 
 def parse_repl(content: str, base_dir: str = ".") -> ReplPlatform:
@@ -31,7 +31,7 @@ def parse_repl(content: str, base_dir: str = ".") -> ReplPlatform:
     inline initialization blocks and non-device nodes.
     """
     platform = ReplPlatform()
-    current_device: Optional[ReplDevice] = None
+    current_device: ReplDevice | None = None
 
     # Regex patterns
     # Device header: usart1: UART.STM32_UART @ sysbus <0x40011000, +0x100>
@@ -57,10 +57,10 @@ def parse_repl(content: str, base_dir: str = ".") -> ReplPlatform:
         match_using = re_using.match(line)
         if match_using:
             included_file = match_using.group(1)
-            full_path = os.path.join(base_dir, included_file)
-            if os.path.exists(full_path):
-                with open(full_path, "r") as f:
-                    included_platform = parse_repl(f.read(), os.path.dirname(full_path))
+            full_path = Path(base_dir) / included_file
+            if Path(full_path).exists():
+                with Path(full_path).open() as f:
+                    included_platform = parse_repl(f.read(), Path(full_path).parent)
                     platform.devices.extend(included_platform.devices)
             else:
                 print(f"Warning: Included file not found: {full_path}")
@@ -142,7 +142,7 @@ if __name__ == "__main__":
     import sys
 
     filename = sys.argv[1] if len(sys.argv) > 1 else "third_party/renode/platforms/boards/cortex_a53_virtio.repl"
-    with open(filename, "r") as f:
+    with Path(filename).open() as f:
         plat = parse_repl(f.read())
         for dev in plat.devices:
             print(f"{dev.name} ({dev.type_name}) @ {dev.address_str}")
