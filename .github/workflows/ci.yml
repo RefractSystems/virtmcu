@@ -95,39 +95,89 @@ jobs:
           targets: devenv-base
           load: true
 
-      - name: Fix workspace permissions
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo-ci-registry
+          key: cargo-registry-tier1-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-registry-tier1-${{ runner.os }}-
+
+      - name: Fix workspace and Cargo registry permissions
         run: |
           # The GitHub runner uses UID 1001, but our container uses 1000 (vscode).
-          # We chown the workspace so the containerized tools can write to it.
+          # Chown both the workspace and the registry cache so the container can write to them.
           sudo chown -R 1000:1000 .
+          mkdir -p "$HOME/.cargo-ci-registry"
+          sudo chown -R 1000:1000 "$HOME/.cargo-ci-registry"
 
       - name: Run Static Analysis (Lint)
         run: |
-          docker run --rm -v "${{ github.workspace }}:/workspace" -w /workspace -e USER=vscode ghcr.io/refractsystems/virtmcu/devenv-base:dev-amd64 make lint
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -v "$HOME/.cargo-ci-registry:/usr/local/cargo/registry" \
+            -w /workspace \
+            -e USER=vscode \
+            -e CARGO_TARGET_DIR=/tmp/ci-target \
+            ghcr.io/refractsystems/virtmcu/devenv-base:dev-amd64 \
+            make lint
 
       - name: Build Packaging Tools
         run: |
-          docker run --rm -v "${{ github.workspace }}:/workspace" -w /workspace -e USER=vscode ghcr.io/refractsystems/virtmcu/devenv-base:dev-amd64 make build-tools
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -v "$HOME/.cargo-ci-registry:/usr/local/cargo/registry" \
+            -w /workspace \
+            -e USER=vscode \
+            -e CARGO_TARGET_DIR=/tmp/ci-target \
+            ghcr.io/refractsystems/virtmcu/devenv-base:dev-amd64 \
+            make build-tools
 
       - name: Run Tier 1 Unit Tests
         run: |
-          docker run --rm -v "${{ github.workspace }}:/workspace" -w /workspace -e USER=vscode ghcr.io/refractsystems/virtmcu/devenv-base:dev-amd64 make test-unit
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -v "$HOME/.cargo-ci-registry:/usr/local/cargo/registry" \
+            -w /workspace \
+            -e USER=vscode \
+            -e CARGO_TARGET_DIR=/tmp/ci-target \
+            ghcr.io/refractsystems/virtmcu/devenv-base:dev-amd64 \
+            make test-unit
 
       - name: Restore workspace permissions
         if: always()
         run: |
           # Revert ownership so GHA cleanup/artifact upload works correctly
           sudo chown -R runner:docker .
+          sudo chown -R runner:docker "$HOME/.cargo-ci-registry" || true
+
+  # Outputs the list of architectures to build. On pull_request events only
+  # amd64 is included — arm64 takes ~40 min and is redundant for PR validation.
+  # On push to main and tags both arches are included for full parity.
+  setup:
+    name: Configure build matrix
+    runs-on: ubuntu-latest
+    outputs:
+      arches: ${{ steps.arches.outputs.arches }}
+    steps:
+      - name: Set target architectures
+        id: arches
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo 'arches=["amd64"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'arches=["amd64","arm64"]' >> "$GITHUB_OUTPUT"
+          fi
 
   build-qemu:
     name: Build QEMU — ${{ matrix.arch }}
-    needs: [changes]
+    needs: [changes, setup]
     if: needs.changes.outputs.expensive == 'true' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        arch: [amd64, arm64]
+        arch: ${{ fromJson(needs.setup.outputs.arches) }}
         include:
           - arch: amd64
             os: ubuntu-latest
@@ -313,12 +363,14 @@ jobs:
           ARCH: ${{ matrix.arch }}
           IMAGE_TAG: sha-${{ github.sha }}
           PUSH_CACHE: "true"
+          RELEASE_TAG: ${{ github.ref_name }}
         with:
           targets: devenv
           push: true
           files: |
             docker-bake.hcl
             ${{ github.ref == 'refs/heads/main' && 'docker-bake-latest.hcl' || '' }}
+            ${{ startsWith(github.ref, 'refs/tags/') && 'docker-bake-release.hcl' || '' }}
 
   merge-devenv:
     name: Merge Devenv Manifest
@@ -379,13 +431,13 @@ jobs:
 
   smoke-tests:
     name: Smoke — ${{ matrix.name }} (${{ matrix.arch }})
-    needs: [changes, build-qemu, tier1-checks]
+    needs: [changes, build-qemu, tier1-checks, setup]
     if: needs.changes.outputs.expensive == 'true' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        arch: [amd64, arm64]
+        arch: ${{ fromJson(needs.setup.outputs.arches) }}
         phase: ["1", "2", "3", "3.5", "4", "5", "6", "7", "8", "9", "10", "11", "11_3", "12", "13", "14", "16", "27", "qmp", "robot"]
         include:
           - arch: amd64
@@ -620,12 +672,14 @@ jobs:
           ARCH: ${{ matrix.arch }}
           IMAGE_TAG: sha-${{ github.sha }}
           PUSH_CACHE: "true"
+          RELEASE_TAG: ${{ github.ref_name }}
         with:
           targets: runtime
           push: true
           files: |
             docker-bake.hcl
             ${{ github.ref == 'refs/heads/main' && 'docker-bake-latest.hcl' || '' }}
+            ${{ startsWith(github.ref, 'refs/tags/') && 'docker-bake-release.hcl' || '' }}
 
   merge-runtime:
     name: Merge Runtime Manifest

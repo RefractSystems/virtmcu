@@ -1,4 +1,5 @@
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -30,6 +31,11 @@ MIPS_THRESHOLDS = {
 # Latency thresholds µs (PLAN §16.2). CI fails if either threshold is exceeded.
 LATENCY_P50_FAIL_US = 10_000
 LATENCY_P99_FAIL_US = 20_000
+
+# ASan instrumentation significantly increases latency in the co-simulation loop.
+if os.environ.get("VIRTMCU_USE_ASAN") == "1":
+    LATENCY_P50_FAIL_US *= 3
+    LATENCY_P99_FAIL_US *= 3
 
 
 def _free_port() -> int:

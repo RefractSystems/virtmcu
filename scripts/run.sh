@@ -139,9 +139,15 @@ elif [ "$ARCH" = "riscv32" ]; then
 fi
 
 # Prioritize the build directory for developers, unless skipped
-if [[ "$VIRTMCU_SKIP_BUILD_DIR" != "1" ]] && [ -f "$QEMU_DIR/build-virtmcu/install/bin/qemu-system-$QEMU_ARCH_NAME" ]; then
+if [[ "$VIRTMCU_SKIP_BUILD_DIR" == "1" ]]; then
+    # Strictly use installed path when skipping build dir
+    QEMU_BIN="/opt/virtmcu/bin/qemu-system-$QEMU_ARCH_NAME"
+    if [ ! -f "$QEMU_BIN" ]; then
+        QEMU_BIN=$(command -v "qemu-system-$QEMU_ARCH_NAME" || true)
+    fi
+elif [ -f "$QEMU_DIR/build-virtmcu/install/bin/qemu-system-$QEMU_ARCH_NAME" ]; then
     QEMU_BIN="$QEMU_DIR/build-virtmcu/install/bin/qemu-system-$QEMU_ARCH_NAME"
-elif [[ "$VIRTMCU_SKIP_BUILD_DIR" != "1" ]] && [ -f "$QEMU_DIR/build-virtmcu/qemu-system-$QEMU_ARCH_NAME" ]; then
+elif [ -f "$QEMU_DIR/build-virtmcu/qemu-system-$QEMU_ARCH_NAME" ]; then
     QEMU_BIN="$QEMU_DIR/build-virtmcu/qemu-system-$QEMU_ARCH_NAME"
     chmod +x "$QEMU_BIN"
 else
@@ -177,19 +183,74 @@ fi
 
 if [ -n "$FOUND_SO" ]; then
     QEMU_MODULE_DIR=$(dirname "$FOUND_SO")
-elif [ -d "$QEMU_DIR/build-virtmcu/install/lib/aarch64-linux-gnu/qemu" ] && ls "$QEMU_DIR/build-virtmcu/install/lib/aarch64-linux-gnu/qemu"/hw-virtmcu-*.so >/dev/null 2>&1; then
+elif [[ "$VIRTMCU_SKIP_BUILD_DIR" != "1" ]] && [ -d "$QEMU_DIR/build-virtmcu/install/lib/aarch64-linux-gnu/qemu" ] && ls "$QEMU_DIR/build-virtmcu/install/lib/aarch64-linux-gnu/qemu"/hw-virtmcu-*.so >/dev/null 2>&1; then
     QEMU_MODULE_DIR="$QEMU_DIR/build-virtmcu/install/lib/aarch64-linux-gnu/qemu"
-elif [ -d "$QEMU_DIR/build-virtmcu/install/lib/qemu" ] && ls "$QEMU_DIR/build-virtmcu/install/lib/qemu"/hw-virtmcu-*.so >/dev/null 2>&1; then
+elif [[ "$VIRTMCU_SKIP_BUILD_DIR" != "1" ]] && [ -d "$QEMU_DIR/build-virtmcu/install/lib/qemu" ] && ls "$QEMU_DIR/build-virtmcu/install/lib/qemu"/hw-virtmcu-*.so >/dev/null 2>&1; then
     QEMU_MODULE_DIR="$QEMU_DIR/build-virtmcu/install/lib/qemu"
 elif [ -d "/opt/virtmcu/lib/aarch64-linux-gnu/qemu" ] && ls /opt/virtmcu/lib/aarch64-linux-gnu/qemu/hw-virtmcu-*.so >/dev/null 2>&1; then
     QEMU_MODULE_DIR="/opt/virtmcu/lib/aarch64-linux-gnu/qemu"
 elif [ -d "/opt/virtmcu/lib/x86_64-linux-gnu/qemu" ] && ls /opt/virtmcu/lib/x86_64-linux-gnu/qemu/hw-virtmcu-*.so >/dev/null 2>&1; then
     QEMU_MODULE_DIR="/opt/virtmcu/lib/x86_64-linux-gnu/qemu"
-elif [ -d "/opt/virtmcu/lib/qemu" ]; then
+elif [ -d "/opt/virtmcu/lib/qemu" ] && ls /opt/virtmcu/lib/qemu/hw-virtmcu-*.so >/dev/null 2>&1; then
     QEMU_MODULE_DIR="/opt/virtmcu/lib/qemu"
 else
-    QEMU_MODULE_DIR="$QEMU_DIR/build-virtmcu/install/lib/qemu"
+    # Final fallback: only if not skipping build dir
+    if [[ "$VIRTMCU_SKIP_BUILD_DIR" != "1" ]]; then
+        QEMU_MODULE_DIR="$QEMU_DIR/build-virtmcu/install/lib/qemu"
+    else
+        echo "Error: No QEMU modules found in /opt/virtmcu and VIRTMCU_SKIP_BUILD_DIR=1 is set."
+        exit 1
+    fi
 fi
+
+# ASan Instrumentation Check
+has_asan() {
+    local file="$1"
+    if [ ! -f "$file" ]; then return 1; fi
+    # Check for ASan initialization symbols which indicate instrumentation
+    if strings "$file" 2>/dev/null | grep -q "__asan_init"; then
+        return 0
+    fi
+    return 1
+}
+
+check_asan_mismatch() {
+    local bin="$1"
+    local mod_dir="$2"
+    local bin_asan=false
+    local mod_asan=false
+    
+    if has_asan "$bin"; then bin_asan=true; fi
+    
+    # Check at least one plugin if it exists
+    local sample_plugin
+    sample_plugin=$(find "$mod_dir" -name "hw-virtmcu-*.so" -print -quit)
+    if [ -n "$sample_plugin" ] && has_asan "$sample_plugin"; then
+        mod_asan=true
+    fi
+    
+    if [ "$bin_asan" != "$mod_asan" ]; then
+        echo "=============================================================================="
+        echo "FATAL: ASan Instrumentation Mismatch Detected!"
+        echo "------------------------------------------------------------------------------"
+        echo "QEMU Binary ($bin): ASan=$( [ "$bin_asan" = true ] && echo "YES" || echo "NO" )"
+        echo "QEMU Modules ($mod_dir): ASan=$( [ "$mod_asan" = true ] && echo "YES" || echo "NO" )"
+        echo "------------------------------------------------------------------------------"
+        echo "Mixing instrumented and non-instrumented code causes 'ASan runtime does not"
+        echo "come first' errors or silent corruption."
+        echo ""
+        if [ "$bin_asan" = true ]; then
+            echo "Action: Rebuild your plugins with VIRTMCU_USE_ASAN=1 or use a non-ASan QEMU."
+        else
+            echo "Action: Rebuild your plugins without ASan or use an ASan-instrumented QEMU."
+        fi
+        echo "=============================================================================="
+        exit 1
+    fi
+}
+
+# Perform pre-flight ASan check
+check_asan_mismatch "$QEMU_BIN" "$QEMU_MODULE_DIR"
 
 # Add zenoh-c to LD_LIBRARY_PATH so QEMU can load the native Zenoh plugins
 if [ -d "$WORKSPACE_DIR/third_party/zenoh-c/lib" ]; then

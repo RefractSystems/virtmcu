@@ -176,7 +176,13 @@ fn zenoh_clock_cpu_halt_cb_internal(s: &mut ZenohClock, _cpu: *mut CPUState, hal
 
         // 1. Advance virtual clock manually if requested by TA.
         // This ensures that 'suspend' mode advances and 'icount' mode wakes up from WFI.
-        let target_vtime = s.next_quantum_ns + delta as i64;
+        //
+        // Use `now` (the vtime at halt_cb entry, also stored as vtime_ns by quantum_wait) as
+        // the quantum base instead of s.next_quantum_ns. Firmware can overshoot the scheduled
+        // boundary (now > s.next_quantum_ns), and the worker always computes its target as
+        // vtime_ns + delta = now + delta. Using s.next_quantum_ns here would produce a target
+        // that is now-s.next_quantum_ns nanoseconds short, causing a guaranteed stall.
+        let target_vtime = now + delta as i64;
         let now_after_block = unsafe { qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) };
 
         if delta > 0 {
@@ -358,11 +364,20 @@ fn zenoh_clock_worker_loop(backend: Arc<ZenohClockBackend>, query_receiver: Rece
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
                     guard = new_guard;
                     if result.timed_out() && start.elapsed() > timeout {
-                        virtmcu_qom::vlog!(
-                            "[virtmcu-clock] STALL: QEMU did not reach quantum boundary (target={}) in time (now={}).\n",
-                            target_vtime,
-                            backend.vtime_ns.load(Ordering::SeqCst)
-                        );
+                        let now_vtime = backend.vtime_ns.load(Ordering::SeqCst);
+                        if now_vtime > target_vtime {
+                            virtmcu_qom::vlog!(
+                                "[virtmcu-clock] STALL: now ({}) > target ({}). Overshoot: {}ns.\n",
+                                now_vtime,
+                                target_vtime,
+                                now_vtime - target_vtime
+                            );
+                        } else {
+                            virtmcu_qom::vlog!(
+                                "[virtmcu-clock] STALL: QEMU did not reach quantum boundary (target={}) in time (now={}).\n",
+                                target_vtime, now_vtime
+                            );
+                        }
                         error_code = 1; // CLOCK_ERROR_STALL
                         break;
                     }

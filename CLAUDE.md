@@ -232,9 +232,25 @@ To ensure the highest level of professional software engineering, all agents MUS
 - **QEMU Patching:** All modifications to QEMU source files, C-level hooks, or SysBus definitions MUST be centralized in `scripts/apply-qemu-patches.sh`. Do not duplicate `sed` commands or `git am` calls across Dockerfiles or bare-metal setup scripts.
 
 ### 7. Environment Parity (1:1 Local-to-Remote Sync)
-- **Mandate:** Local CI simulations (`make ci-local`) MUST exactly mirror the GitHub Actions environment. Tests and lints must be executed *inside* the isolated Docker container (`ghcr.io/refractsystems/virtmcu/devenv-base:dev-amd64`), never directly on the host machine.
-- **Why:** This strict 1:1 parity prevents "Works on My Machine" bugs caused by host toolchain drift (e.g., a missing `cargo-audit` or `hadolint` version mismatch).
-- **Reference:** For details on the CI architecture, caching strategies, and the `devenv-base` vs `devenv` split, consult `docs/CI_GUIDE.md`. Whenever modifying CI pipelines or `Makefile` targets, you must maintain this strict 1:1 synchronization constraint.
+
+There are three escalating local gates; each is a strict superset of the previous:
+
+| Gate | When to run | What it does |
+|---|---|---|
+| **Hooks** (`make lint && make test-unit`) | Every commit/push automatically | Runs directly in the devcontainer — no Docker spawn. Fast (~3-5 min). |
+| **`make ci-local`** | Before opening a PR | Builds `devenv-base` locally and runs the identical three `docker run` steps that `.github/workflows/ci.yml` executes: `lint → build-tools → test-unit`. |
+| **`make ci-full`** | Before merging to main | `ci-local` + ASan + Miri + full `builder` Docker image + all smoke phases run sequentially. Authoritative "will GitHub be green?" answer. |
+
+**Why hooks run directly (not inside Docker):** The devcontainer IS `devenv-base`. Running `make lint` directly in the devcontainer is identical toolchain coverage without the CARGO_HOME conflict that corrupted Cargo's fingerprint cache. Reserve `make ci-local` for the containerised simulation.
+
+**The CARGO_HOME / cache-isolation mandate:** Every `docker run devenv-base` invocation in the Makefile MUST use the following two flags — never use `-e CARGO_HOME=...` with a host path:
+```
+-e CARGO_TARGET_DIR=/tmp/ci-target          # compiled artifacts stay inside container
+-v ci-cargo-registry:/usr/local/cargo/registry  # named volume for downloaded crates
+```
+Sharing `target/` between the host (CARGO_HOME=/usr/local/cargo) and a container running a different CARGO_HOME corrupts Cargo fingerprints and causes "can't find crate" errors on proc-macro crates. The named volume replaces the old `.cargo-cache` host-path bind-mount. See `docs/CI_GUIDE.md` for the full mount table.
+
+- **Reference:** For details on the CI architecture, mount strategy, and the `devenv-base` vs `devenv` split, consult `docs/CI_GUIDE.md`. Whenever modifying CI pipelines or `Makefile` targets, you must maintain this strict 1:1 synchronization constraint.
 
 ### 8. Enterprise-Ready Quality (No Quality Regression)
 - **Mandate:** Agents are NEVER allowed to lower the quality, strictness, or coverage of lints, static analyzers, type-checkers, or security gates without explicit human written consent.
@@ -344,18 +360,20 @@ make lint     # Runs ruff, version checks, cargo clippy -D warnings, sleep-ban g
 - `#[allow(clippy::too_many_lines)]` is banned — split the function instead.
 
 ### Git Hooks (Automation)
-The project uses Git hooks to automatically run \`make lint\` on both \`commit\` and \`push\`.
+Both the `pre-commit` and `pre-push` hooks run `make lint && make test-unit` **directly** in the current shell (devcontainer or native Mac environment). There is no nested `docker run` — the devcontainer already is `devenv-base`.
 
 - **Installation**:
   - **Devcontainer**: Hooks are installed automatically on container creation.
-  - **Manual**: Run \`make install-hooks\` to set them up in your local \`.git/hooks\` directory.
-- **Bypassing**: If you must commit/push without running lints (e.g., for a work-in-progress commit that you know is messy), use the \`--no-verify\` flag:
-  \`\`\`bash
+  - **Manual**: Run `make install-hooks` to install or reinstall them.
+- **Bypassing**: If you must skip for a work-in-progress commit you know is messy:
+  ```bash
   git commit -m "wip: messy change" --no-verify
   git push --no-verify
-  \`\`\`
+  ```
 
-**Pre-commit Hook**: A git \`pre-commit\` hook is installed that runs \`make lint\` automatically. If it fails, the commit will be blocked. Fix all lint/clippy errors before attempting to commit again.
+**What the hooks run:** `make lint` (ruff, clippy -D warnings, check-ffi, shellcheck, …) followed by `make test-unit` (Rust + Python unit tests, no QEMU). Total wall time: ~3-5 min.
+
+**For full CI parity before a PR:** run `make ci-local`. For complete pre-merge validation: run `make ci-full`.
 
 ---
 
@@ -364,11 +382,11 @@ The project uses Git hooks to automatically run \`make lint\` on both \`commit\`
 When instructed to **"fix CI"**, **"make CI green"**, or address pipeline failures, you MUST enter the **Enterprise CI Fixer Loop**. This is not just about pushing a fix; it is about absolute empirical certainty.
 
 1. **Diagnose Remotely:** Use the GitHub CLI (`gh run list`, `gh run view --log`) to identify the exact failure.
-2. **Local Reproduction (The `ci-full` Gate):** You MUST reproduce the failure locally using `make ci-full` or the corresponding containerized smoke test. If it passes locally but fails in CI, **STOP.** You have not reproduced it. Align local scripts, timeouts (`VIRTMCU_STALL_TIMEOUT_MS`), or environment until the failure is caught locally.
-3. **Stress Test the Bug:** Once reproduced, "stress test the hell out of the bug." Run the failing test 100+ times (or use a dedicated stress test if one exists, or create a new one). Quantify the failure rate.
+2. **Local Reproduction (The `ci-full` Gate):** You MUST reproduce the failure locally using `make ci-full` or the specific smoke phase directly: `docker run --rm -v $(pwd):/workspace -w /workspace -e USER=vscode $(BUILDER_IMG) bash scripts/ci-phase.sh <PHASE>`. If it passes locally but fails in CI, **STOP.** Align scripts, timeouts (`VIRTMCU_STALL_TIMEOUT_MS`), or environment until the failure is caught locally.
+3. **Stress Test the Bug:** Once reproduced, run the failing test 100+ times. Quantify the failure rate.
 4. **Exhaustive Implementation:** Implement the fix.
 5. **Verified Recovery:** Prove the fix works by running the same stress test again. It must reach a 100% success rate over a significant number of runs.
-6. **Final Lint Gate:** Run `make ci-local` to ensure that lints, unit tests, and the lightweight environment are perfectly clean.
+6. **Final Lint Gate:** Run `make ci-local` to ensure that lints, build-tools, and unit tests pass in the containerised environment.
 7. **Commit & Push:** Commit the fix and the new/updated stress tests.
 8. **Monitor & Loop:** Autonomously monitor the new CI run (`gh run watch`). If it fails, restart this loop immediately. Do not stop until the pipeline is officially green.
 

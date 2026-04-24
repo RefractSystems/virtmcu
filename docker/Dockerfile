@@ -272,13 +272,38 @@ RUN rm -rf /build/qemu/hw/virtmcu && ln -sf /build/virtmcu/hw /build/qemu/hw/vir
 
 WORKDIR /build/qemu/build-virtmcu
 ARG VIRTMCU_USE_ASAN=0
+ARG TARGETARCH
 # hadolint ignore=SC2016
 RUN --mount=type=cache,target=/var/cache/ccache \
-    --mount=type=cache,target=/build/qemu/build-virtmcu/hw/virtmcu/target-v2 \
-    --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,id=cargo-target-qom-${TARGETARCH},target=/build/qemu/build-virtmcu/hw/virtmcu/target-v2 \
+    --mount=type=cache,id=cargo-registry-${TARGETARCH},target=/usr/local/cargo/registry \
     VIRTMCU_USE_ASAN=${VIRTMCU_USE_ASAN} make -j"$(nproc)" \
-    && make install \
-    && mkdir -p /opt/virtmcu/lib/qemu/plugins \
+    && make install
+
+# Build the test tools (zenoh_coordinator, mujoco_bridge, resd_replay) here in
+# the builder stage where ALL workspace members are already present under
+# /build/virtmcu/{hw,tools}.  No member-list pruning or sed hacks required.
+#
+# Cache strategy:
+#   cargo-registry-${TARGETARCH}      — shared with the QOM build above; crate
+#                                       tarballs are already warm.
+#   cargo-target-tools-${TARGETARCH}  — separate from the QOM target so the two
+#                                       Cargo invocations never share artifact dirs.
+#
+# Artifacts are copied to /opt/virtmcu/bin/ within the same RUN so they land in
+# the image layer, not just inside the ephemeral cache mount.
+# Note: 'cyber_bridge' is the package name; its [[bin]] targets are mujoco_bridge
+# and resd_replay (no binary named cyber_bridge is produced).
+WORKDIR /build/virtmcu
+RUN --mount=type=cache,id=cargo-registry-${TARGETARCH},target=/usr/local/cargo/registry \
+    --mount=type=cache,id=cargo-target-tools-${TARGETARCH},target=/build/virtmcu/target \
+    cargo build --release -p zenoh_coordinator -p cyber_bridge \
+    && cp target/release/zenoh_coordinator /opt/virtmcu/bin/ \
+    && cp target/release/mujoco_bridge /opt/virtmcu/bin/ \
+    && cp target/release/resd_replay /opt/virtmcu/bin/
+
+# hadolint ignore=SC2016
+RUN mkdir -p /opt/virtmcu/lib/qemu/plugins \
     && mkdir -p /opt/virtmcu/include \
     && cp -R /build/zenoh-c/include/* /opt/virtmcu/include/ \
     && cp -R /usr/local/include/flatcc /opt/virtmcu/include/ \

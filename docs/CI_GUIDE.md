@@ -1,120 +1,126 @@
 # CI/CD & Reliability Guide
 
-How to understand the optimized CI pipeline, reproduce failures locally, and leverage the automated "Self-Healing" environment.
+How to understand the optimized CI pipeline, reproduce failures locally, and understand every mount and cache involved.
 
 ---
 
-## 1. Reliability Architecture (The "Safe Workspace")
+## 1. Local CI Gates — Three Levels
 
-We employ a "Defense in Depth" strategy to ensure that tests are deterministic and parallel-safe, whether running on a multi-core GitHub runner or concurrently by multiple developers/agents on the same machine.
+There is no magic here. Every level is documented so that agents and humans can reason about what runs where, on which filesystem, and why.
 
-### The Self-Healing Loop
+### Level 0 — Git Hooks (fast, no Docker)
 
-Every time you run a major test target (like `make test-unit` or a CI phase), the environment automatically self-corrects using the following flow:
+Installed by `make install-hooks`. Both `pre-commit` and `pre-push` run:
+```bash
+make lint && make test-unit
+```
+**Directly in the current shell** — no `docker run` involved.
 
-```mermaid
-graph TD
-    start[Trigger Test / Build] --> cleanup[scripts/cleanup-sim.sh]
-    cleanup --> ws_check{Workspace Scoped?}
-    ws_check -- Yes --> kill_orphans[Kill orphaned QEMU/Zenoh processes from THIS workspace only]
-    kill_orphans --> ffi_gate[scripts/check-ffi.py]
-    ffi_gate --> layout_check{FFI Layouts Match?}
-    layout_check -- No --> crash[Loud Failure: Fix Rust Structs]
-    layout_check -- Yes --> run_test[Invoke Pytest / Smoke Test]
-    run_test --> dynamic_port[scripts/get-free-port.py]
-    dynamic_port --> unique_router[Unique Zenoh Router Instance]
-    unique_router --> success[Deterministic Test Result]
+Why no Docker: the devcontainer is built from the same `devenv-base` image that GitHub CI uses. Running directly in it gives identical toolchain coverage without the CARGO_HOME conflict that corrupted Cargo's fingerprint cache in earlier designs (see §5 for the full story).
+
+Bypass when needed: `git commit --no-verify` / `git push --no-verify`.
+
+### Level 1 — `make ci-local` (GitHub Tier 1 simulation, ~5-10 min)
+
+Builds the `devenv-base` image locally (or uses a cached layer), then runs the **exact same three `docker run` commands** that `.github/workflows/ci.yml` executes:
+
+```
+make lint          (ruff, clippy -D warnings, check-ffi, hadolint, …)
+make build-tools   (virtmcu-tools Python wheel validation)
+make test-unit     (Rust unit tests + Python unit tests, no QEMU)
 ```
 
-### Key Safety Mechanisms
+Run this before opening a pull request.
 
-#### A. Workspace-Scoped Cleanup (`cleanup-sim.sh`)
-Unlike standard cleanup scripts that nuke all processes by name, our cleanup is **Workspace-Scoped**. 
-- **Assumption:** Multiple agents or developers may be working on the same machine in different cloned directories.
-- **Mechanism:** It inspects `/proc/<pid>/cwd` and `/proc/<pid>/cmdline`.
-- **Result:** It *only* kills orphaned processes that originated from your specific directory. You can safely run tests in `/workspace-A` while another simulation is running in `/workspace-B`.
+### Level 2 — `make ci-full` (authoritative parity, ~40-50 min cold)
 
-#### B. The FFI Gate (`check-ffi.py`)
-To prevent cryptic `SIGSEGV` (Segmentation Faults) caused by layout drift between C (QEMU) and Rust (Plugins).
-- **Mechanism:** Uses `pahole` to extract the binary ground truth of struct offsets (like `Chardev` or `Netdev`) directly from the compiled `qemu-system-arm`.
-- **Validation:** Compares these offsets against the `assert!` statements in our Rust code. 
-- **Mandate:** If the layouts don't match, the build **fails loudly** before the simulation starts.
+`ci-local` + `ci-asan` + `ci-miri` + full `builder` Docker image build (QEMU compiled inside) + every smoke phase run sequentially inside that image via `scripts/ci-phase.sh all`.
 
-#### C. Dynamic Port Allocation (`get-free-port.py`)
-To enable massive parallelism (`pytest -n auto`) without "Address already in use" errors or file collisions.
-- **Ports:** Tests never use hardcoded ports (like 7447). They invoke a utility (`scripts/get-free-port.py` or the `zenoh_router` fixture) that finds an available ephemeral port.
-- **Paths:** Tests never write generated artifacts (`.dtb`, `.yaml`) to shared directories. They strictly use isolated temporary directories (e.g., `tmp_path` fixture in pytest or `mktemp` in bash).
-- **Result:** Every parallel test worker gets its own isolated Zenoh router, communication bus, and artifact directory.
+This is the authoritative "will GitHub be green?" answer. Run this before merging to main.
 
 ---
 
-## 2. Test Script Assumptions (Do's and Don'ts)
+## 2. Mount Strategy — What Lives Where
 
-When writing new tests or smoke scripts, adhere to these strict architectural assumptions for out-of-the-box parallel readiness:
+Every `docker run devenv-base` call in the Makefile uses these mounts. There is no `.cargo-cache` host-path bind-mount anymore.
 
-| Assumption | Safe / Recommended | Dangerous / BANNED |
-| :--- | :--- | :--- |
-| **Ports** | `scripts/get-free-port.py`, `zenoh_router` fixture | Hardcoded numbers (7447, 1234) |
-| **File Generation** | `tmp_path` fixture, `mktemp -d` | Writing to `workspace_root` or `test/phaseX/` |
-| **Uniqueness** | Deterministic ID (e.g., `os.getpid()`, `worker_id`) | Non-deterministic `random.randint()` |
-| **Daemons** | Reusable `pytest` fixtures | `subprocess.Popen("cargo run...")` |
-| **Temp Dirs** | Use `tempfile.mkdtemp()` or `/tmp/virtmcu-test-*` | `/tmp/my_test_data` (Fixed path) |
-| **Process Ownership** | Trust the Workspace Scoping | `pkill qemu` (Global kill) |
-| **QEMU Path** | Use `scripts/run.sh` (Auto-prioritizes build dir) | `/opt/virtmcu/bin/...` (Absolute path) |
-| **Cleanup** | Let the fixture/Makefile handle it | Calling `make clean-sim` inside a fixture |
+| Mount | Host side | Container path | Type | Purpose |
+|---|---|---|---|---|
+| Workspace | `$(CURDIR)` | `/workspace` | bind | Source code, test scripts, generated `.venv-docker`, `test-results/` |
+| Cargo registry | Docker named volume `ci-cargo-registry` | `/usr/local/cargo/registry` | named volume | Downloaded crate source tarballs. Persists across runs; never touches the host filesystem |
+| Compiled artifacts | (none — ephemeral) | `/tmp/ci-target` via `CARGO_TARGET_DIR` | tmpfs inside container | Rust `.rlib`/binary outputs. Disappears when the container exits |
+| Python venv | `$(CURDIR)/.venv-docker` (inside workspace bind) | `/workspace/.venv-docker` via `UV_PROJECT_ENVIRONMENT` | bind (subdir) | Isolated Python environment so host `.venv` and container venv never mix |
 
----
+**What is explicitly NOT mounted into the container:**
+- `$(CURDIR)/target/` — the host's Cargo target directory. This is the critical exclusion. Sharing it between the host (CARGO_HOME=/usr/local/cargo) and the container would cause fingerprint corruption (see §5).
+- `$(CURDIR)/.cargo-cache/` — the old host-path registry cache. Replaced by the `ci-cargo-registry` named volume.
 
-## 3. Local vs. GitHub CI Flows
+**The builder-image smoke tests** (in `ci-full` and `test-integration-docker`) use the same bind-mount for `/workspace` but target the `builder` image instead of `devenv-base`. The `builder` image already has QEMU, all `.so` plugins, and the test tools (`zenoh_coordinator`, `mujoco_bridge`, `resd_replay`) baked into `/opt/virtmcu/`. No source compilation happens during smoke tests.
 
-While we strive for 1:1 parity, there are subtle differences in how resources are managed:
+### Named Docker Volume Lifecycle
 
-| Feature | Local (Native) | GitHub Actions (Containerized) |
-| :--- | :--- | :--- |
-| **Auth Strategy** | Switch to HTTPS (Self-Healing) | Pre-configured GH_TOKEN |
-| **Isolation** | Workspace Scoping (PID namespace shared) | Full Container Isolation (Cgroups) |
-| **Stall Timeout** | 5 seconds (Fast feedback) | 120 seconds (Slow runner tolerance) |
-| **Cleanup** | Explicitly Workspace-Scoped | Entire runner is wiped after job |
-| **FFI Check** | Runs against `third_party/qemu/` | Runs against pre-baked image |
+```bash
+# Inspect
+docker volume inspect ci-cargo-registry
 
-### Reproducing a CI Failure Locally
-If a phase fails on GitHub, use the following "Bulletproof Reproduction" steps:
-1. Run `make check-ffi` to ensure your layouts are valid.
-2. Run `make ci-local` to verify Tier 1 parity.
-3. Run the specific phase inside the builder:
-   ```bash
-   make docker-builder
-   docker run --rm -v $(pwd):/workspace -w /workspace -e USER=vscode virtmcu-builder:dev bash scripts/ci-phase.sh <PHASE_NUMBER>
-   ```
+# Prune if corrupted or you need a clean slate
+docker volume rm ci-cargo-registry
+
+# ci-local will recreate it automatically on next run
+```
 
 ---
 
-## 4. Pipeline Overview (The 5-Tier Workflow)
+## 3. Docker Image Hierarchy
 
-Our GitHub Actions pipeline (`ci.yml`) is structured into 5 logical tiers to fail fast and save compute time.
+```
+rust-builder          (Stage 0)  Rust toolchain + bindgen + cargo-audit etc.
+base                  (Stage 1)  Debian slim + vscode user + uv + gh CLI
+toolchain             (Stage 2)  base + build deps + ARM toolchain + Python + CMake + FlatBuffers
+flatcc-builder        (Stage 3)  Temporary: builds flatcc from source
+simulation-toolchain  (Stage 4)  toolchain + flatcc + zenoh-c + Rust (from rust-builder)
+qemu-builder          (Stage 5)  simulation-toolchain + QEMU cloned + base QEMU compiled
+builder               (Stage 6)  qemu-builder + hw/ plugins + tools binaries → installed to /opt/virtmcu
+devenv-base           (Stage 7)  toolchain + Rust + Node.js + Python deps (NO QEMU baked in)
+devenv                (Stage 8)  devenv-base + /opt/virtmcu copied from builder
+runtime               (Stage 9)  base + Python deps + /opt/virtmcu (lean runtime image)
+```
+
+**devenv-base vs devenv:**
+- `devenv-base` is what GitHub Tier 1 and `make ci-local` use — it has the full toolchain but no QEMU binary. Fast to build, used for lint + unit tests.
+- `devenv` is the developer-facing image used in `.devcontainer/`. It includes the pre-built QEMU from `builder`.
+
+**Why test tools are built in Stage 6 (`builder`), not in a separate stage:**
+A previous design had a `test-tools-builder` stage that copied a subset of the workspace and used `sed` to prune `Cargo.toml` members. This was fragile: new workspace members broke it silently, and the wrong binary name (`cyber_bridge` package produces `mujoco_bridge` + `resd_replay`, not a binary called `cyber_bridge`). Stage 6 already has the full workspace under `/build/virtmcu/{hw,tools}`, so all members are present and no pruning is needed.
+
+---
+
+## 4. Pipeline Overview (GitHub CI Tiers)
 
 ```mermaid
 graph TD
-    subgraph Tier 1 [Fast Checks - Parallel]
-        lint[Static Analysis: ruff, clippy, check-ffi]
-        ut[Unit Tests: no QEMU]
+    subgraph Tier 1 [Fast Checks]
+        lint[make lint]
+        bt[make build-tools]
+        ut[make test-unit]
+        lint --> bt --> ut
     end
 
-    subgraph Tier 2 [Emulator Build]
-        bq[Build QEMU & FFI Bindings]
+    subgraph Tier 2 [Emulator Build - both arches in parallel]
+        bq[docker buildx bake builder]
     end
 
-    subgraph Tier 3 [Integration Matrix]
-        smoke[Smoke Tests: 20 Phases x 2 Arch]
+    subgraph Tier 3 [Smoke Tests - 20 phases × 2 arches]
+        smoke[bash scripts/ci-phase.sh PHASE inside builder image]
     end
 
-    subgraph Tier 4 [Validation]
-        pcov[Peripheral C Coverage]
-        fcov[Guest Firmware Coverage]
+    subgraph Tier 4 [Coverage]
+        pcov[Peripheral C coverage]
+        fcov[Guest firmware coverage]
     end
 
-    subgraph Tier 5 [Late Publish]
-        pub[Merge & Publish multi-arch images]
+    subgraph Tier 5 [Publish]
+        pub[Push devenv + runtime multi-arch manifests]
     end
 
     Tier 1 --> Tier 3
@@ -123,26 +129,98 @@ graph TD
     Tier 4 --> Tier 5
 ```
 
-### Tier 1: Fast Static Analysis & Unit Tests (`tier1-checks`)
-- **FFI Gate Integration:** `make lint` now automatically triggers `check-ffi`. If you modify a struct in Rust but forget to update the C header (or vice versa), CI will fail here before building QEMU.
-- **Zero-Drift Policy:** This job builds a local `devenv-base` to ensure the linting tools (like `pahole`) match exactly what the developers are using.
+### Tier 1 — Static Analysis & Unit Tests
+GitHub runs three `docker run devenv-base` commands sequentially with no `CARGO_HOME` override. `make ci-local` mirrors this exactly using the same image, same flags, and same command sequence.
 
-### Tier 2: Build & Cache QEMU (`build-qemu`)
-- **Registry Caching:** We push the intermediate `builder` image to GHCR. Subsequent integration tests `docker pull` this image instantly, bypassing the 40-minute compilation.
-- **Staleness Protection:** The build system uses a hash of `patches/` and `VERSIONS` to determine if a full rebuild is required.
+### Tier 2 — Build QEMU
+`docker buildx bake builder` compiles QEMU and all Rust plugins inside the multi-stage Dockerfile. The resulting image is pushed to GHCR and tagged with the commit SHA so Tier 3 runners can pull it without rebuilding.
 
-### Tier 3: Integration Smoke Tests (`smoke-tests`)
-- **Massive Fan-out:** 40 parallel runners execute the phases.
-- **Hygiene:** Every phase runner invokes `scripts/cleanup-sim.sh` before starting to ensure no side effects from container layering.
+### Tier 3 — Smoke Tests
+Each phase is an independent `docker run builder bash scripts/ci-phase.sh <phase>` job. The phases run in parallel across 40 GitHub runners (20 phases × 2 arches). `scripts/ci-phase.sh` is the single source of truth for what each phase does — it is used by both GitHub and `make ci-full`.
+
+### Tier 4 — Coverage
+Collects `.gcda` files produced during Tier 3 (via `GCOV_PREFIX`) and runs `gcovr` inside the builder image to produce unified reports.
 
 ---
 
-## Troubleshooting Guide
+## 5. The CARGO_HOME Corruption Story (Why the Design Is What It Is)
 
-| Pattern | Cause | Action |
+This section exists so agents and humans never repeat the same mistake.
+
+**The old design** had three Cargo environments sharing the same `target/` directory:
+
+| Context | CARGO_HOME | target/ |
+|---|---|---|
+| Direct `cargo` in devcontainer | `/usr/local/cargo` (baked) | `/workspace/target` |
+| `make ci-local` docker run | `/workspace/.cargo-cache` (overridden) | `/workspace/target` (bind-mounted) |
+| GitHub CI docker run | no override → `/usr/local/cargo` | `/workspace/target` |
+
+Cargo embeds the registry source path in every `.rlib` fingerprint. When `make ci-local` overrode `CARGO_HOME` to `/workspace/.cargo-cache` but mounted the same `/workspace/target` that the devcontainer had compiled against `/usr/local/cargo`, Cargo saw the existing `.rlib` files as belonging to a different registry and tried to recompile. Partial downloads (from interrupted runs) left the registry in an inconsistent state. Result: "can't find crate for `proc_macro2`" errors that disappeared after `rm -rf /workspace/.cargo-cache/registry` — until the next interrupted run.
+
+**The fix has two parts:**
+1. `CARGO_TARGET_DIR=/tmp/ci-target` — compiled artifacts stay inside the container and vanish on exit. The host `target/` is never touched.
+2. Named volume `ci-cargo-registry` at `/usr/local/cargo/registry` — crate downloads persist across `docker run` invocations without a host-path bind that the devcontainer also writes to.
+
+**Rule:** Never add `-e CARGO_HOME=<host-path>` to a `docker run` that also mounts the workspace. If you need to cache downloads across runs, use a named Docker volume.
+
+---
+
+## 6. Reliability Architecture (The "Safe Workspace")
+
+### Workspace-Scoped Cleanup (`cleanup-sim.sh`)
+Inspects `/proc/<pid>/cwd` and `/proc/<pid>/cmdline`. Only kills orphaned QEMU/Zenoh processes that originated from the active workspace directory — other agents' simulations in other directories are untouched.
+
+### The FFI Gate (`check-ffi.py`)
+Uses `pahole` to extract struct offsets directly from the compiled `qemu-system-arm` binary and compares them against the `assert!` statements in Rust. Layout drift → loud failure before any simulation starts.
+
+### Dynamic Port Allocation (`get-free-port.py`)
+Tests never use hardcoded ports. Every parallel worker gets its own ephemeral Zenoh router via the `zenoh_router` pytest fixture or `scripts/get-free-port.py` in bash.
+
+---
+
+## 7. Test Script Conventions
+
+| Assumption | Safe / Recommended | Banned |
 | :--- | :--- | :--- |
-| **`SIGSEGV` in plugin** | FFI Layout drift | Run `scripts/check-ffi.py --fix` |
-| **`Address already in use`** | Hardcoded port leak | Switch test to use `scripts/get-free-port.py` |
-| **`Permission denied` in /workspace** | UID mismatch | Run `sudo chown -R 1000:1000 .` |
-| **Remote push fails** | Broken SSH socket | Re-open container (Self-heals to HTTPS) |
-| **CI STALL error** | Runner load spike | Increase `VIRTMCU_STALL_TIMEOUT_MS` |
+| Ports | `scripts/get-free-port.py`, `zenoh_router` fixture | Hardcoded numbers (7447, 1234) |
+| File generation | `tmp_path` fixture, `mktemp -d` | Writing to `workspace_root` or `test/phaseX/` |
+| Uniqueness | `os.getpid()`, `worker_id` | `random.randint()` |
+| Daemons | Reusable `pytest` fixtures | `subprocess.Popen("cargo run...")` |
+| Temp dirs | `tempfile.mkdtemp()` or `/tmp/virtmcu-test-*` | Fixed `/tmp/my_test_data` |
+| Process kill | Trust workspace scoping | `pkill qemu` (global kill) |
+| QEMU path | `scripts/run.sh` | `/opt/virtmcu/bin/...` (absolute) |
+| Cleanup | Fixture / Makefile | `make clean-sim` inside a fixture |
+
+---
+
+## 8. Reproducing a GitHub CI Failure Locally
+
+1. `make check-ffi` — verify FFI layout is valid.
+2. `make ci-local` — reproduce Tier 1 failures (lint/build-tools/unit-tests).
+3. For a specific smoke phase:
+   ```bash
+   # Build or pull the builder image first
+   bash scripts/docker-build.sh builder
+   # Run the failing phase
+   docker run --rm \
+     -v "$(pwd):/workspace" -w /workspace \
+     -e PYTHONPATH=/workspace \
+     -e VIRTMCU_STALL_TIMEOUT_MS=120000 \
+     -e USER=vscode \
+     ghcr.io/refractsystems/virtmcu/builder:dev-amd64 \
+     bash scripts/ci-phase.sh <PHASE_NUMBER>
+   ```
+4. For the full matrix: `make ci-full` (runs phases sequentially, same script as GitHub).
+
+---
+
+## 9. Troubleshooting
+
+| Symptom | Cause | Fix |
+| :--- | :--- | :--- |
+| `can't find crate for proc_macro2` / `rand` / etc. | Cargo fingerprint corruption (CARGO_HOME mismatch with shared target/) | `docker volume rm ci-cargo-registry` then re-run. Never use `-e CARGO_HOME=<host-path>` with a mounted workspace. |
+| `SIGSEGV` in plugin | FFI layout drift | `scripts/check-ffi.py --fix` |
+| `Address already in use` | Hardcoded port | Switch to `scripts/get-free-port.py` |
+| `Permission denied` in /workspace | UID mismatch in container | `sudo chown -R 1000:1000 .` |
+| CI STALL | Runner load spike | Raise `VIRTMCU_STALL_TIMEOUT_MS` |
+| `cyber_bridge` binary not found | Wrong binary name | The `cyber_bridge` package produces `mujoco_bridge` and `resd_replay` — never a binary called `cyber_bridge`. |

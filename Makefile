@@ -2,7 +2,6 @@ ARCH ?= $(shell uname -m | sed -e "s/x86_64/amd64/" -e "s/aarch64/arm64/")
 IMAGE_TAG ?= dev
 DEVENV_BASE_IMG ?= ghcr.io/refractsystems/virtmcu/devenv-base:$(IMAGE_TAG)-$(ARCH)
 BUILDER_IMG ?= ghcr.io/refractsystems/virtmcu/builder:$(IMAGE_TAG)-$(ARCH)
-CARGO_CACHE_DIR ?= $(CURDIR)/.cargo-cache
 VIRTMCU_USE_CCACHE ?= 0
 export VIRTMCU_USE_CCACHE
 
@@ -25,7 +24,7 @@ QEMU_BUILD?= $(QEMU_SRC)/build-virtmcu
 # Automatically determine the number of parallel jobs for make
 JOBS      ?= $(shell nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
 
-.PHONY: all setup-initial build run clean clean-sim clean-debug distclean venv fmt fmt-python fmt-rust fmt-c fmt-meson fmt-yaml lint lint-python lint-python-types lint-rust lint-c lint-shell lint-docker lint-yaml lint-actions lint-meson lint-spelling check-ffi test test-unit test-python test-integration test-robot test-all build-test-artifacts build-tools install-hooks sync-versions check-versions docker-dev docker-all docker-base docker-toolchain docker-devenv docker-builder docker-runtime ci-local ci-full perf-bench perf-check perf-baseline
+.PHONY: all setup-initial build run clean clean-sim clean-debug distclean venv fmt fmt-python fmt-rust fmt-c fmt-meson fmt-yaml lint lint-python lint-python-types lint-rust lint-c lint-shell lint-docker lint-yaml lint-actions lint-meson lint-spelling check-ffi test test-unit test-python test-integration test-robot test-all build-test-artifacts build-tools install-hooks sync-versions check-versions docker-dev docker-all docker-base docker-toolchain docker-devenv docker-builder docker-runtime ci-local ci-full perf-bench perf-check perf-baseline tag
 
 # By default, perform an incremental build
 all: build
@@ -123,7 +122,7 @@ test-asan: venv
 	VIRTMCU_USE_ASAN=1 bash scripts/setup-qemu.sh --force
 	@bash scripts/cleanup-sim.sh --quiet
 	@echo "==> Running integration tests under ASan/UBSan..."
-	ASAN_OPTIONS=detect_leaks=1,halt_on_error=1,detect_stack_use_after_return=1 \
+	VIRTMCU_USE_ASAN=1 ASAN_OPTIONS=detect_leaks=1,halt_on_error=1,detect_stack_use_after_return=1 \
 	UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
 	$(MAKE) test-integration
 	@echo "✓ All ASan integration tests passed."
@@ -218,14 +217,14 @@ test-all: test test-integration test-robot test-coverage-guest
 test-integration-docker:
 	@echo "==> Running integration tests inside builder container..."
 	@bash scripts/docker-build.sh builder
-	@mkdir -p $(CARGO_CACHE_DIR)
 	docker run --rm \
 		--user $$(id -u):$$(id -g) \
 		-e HOME=/tmp \
 		-e USER=vscode \
-		-e CARGO_HOME=/workspace/.cargo-cache \
+		-e CARGO_TARGET_DIR=/tmp/ci-target \
 		-e UV_PROJECT_ENVIRONMENT=/workspace/.venv-docker \
 		-v "$(CURDIR):/workspace" -w /workspace \
+		-v ci-cargo-registry:/usr/local/cargo/registry \
 		-e PYTHONPATH=/workspace \
 		-e VIRTMUC_SKIP_QEMU_HEADERS_WARNING=1 \
 		-e VIRTMCU_SKIP_BUILD_DIR=1 \
@@ -396,10 +395,15 @@ fmt-yaml:
 install-hooks:
 	@echo "==> Installing Git hooks..."
 	@mkdir -p .git/hooks
-	@printf '#!/bin/sh\nset -e\nmake ci-local\n' > .git/hooks/pre-commit
-	@printf '#!/bin/sh\nset -e\nmake test-integration-docker\n' > .git/hooks/pre-push
+	# Hooks run directly in the current environment (devcontainer or native).
+	# No nested docker spawn — the devcontainer IS devenv-base, so running
+	# directly gives identical toolchain coverage without the CARGO_HOME conflict.
+	# Use 'make ci-local' for the full containerised Tier-1 simulation,
+	# and 'make ci-full' before merging to verify complete parity with GitHub.
+	@printf '#!/bin/sh\nset -e\nmake lint && make test-unit\n' > .git/hooks/pre-commit
+	@printf '#!/bin/sh\nset -e\nmake lint && make test-unit\n' > .git/hooks/pre-push
 	@chmod +x .git/hooks/pre-push .git/hooks/pre-commit
-	@echo "✓ hooks installed: pre-commit (ci-local), pre-push (test-integration-docker)."
+	@echo "✓ hooks installed: pre-commit and pre-push run 'make lint && make test-unit' directly."
 
 # ------------------------------------------------------------------------------
 # Performance Benchmarking & Trend Tracking (Phase 16)
@@ -426,39 +430,67 @@ perf-check: venv
 # Local CI Simulation
 # Mirrors the GitHub CI tier structure so you can validate locally before push.
 #
-#   make ci-local   — Fast path for git commit hooks. Runs lints and unit tests
-#                    inside the devenv-base container. Does NOT build the container.
-#                    (Run 'make docker-dev' manually if the image is missing or stale).
+# Three escalating gates — each one is a strict superset of the previous:
 #
-#   make ci-full    — ci-local + ci-asan + ci-miri + builder stage (QEMU compile) +
-#                    runtime image + representative phase smoke tests inside container.
-#                    This is the closest local equivalent to the full GitHub CI run.
+#   Hooks (pre-commit / pre-push)
+#     make lint && make test-unit   — run directly in the devcontainer.
+#     Fast (~3-5 min). No Docker spawn. Use --no-verify to skip in an emergency.
 #
-# All linting tools are mandatory for 1:1 parity with GitHub CI.
+#   make ci-local   — GitHub Tier 1 simulation in a fresh devenv-base container.
+#     Runs lint → build-tools → test-unit in the SAME image and with the SAME
+#     flags that .github/workflows/ci.yml uses.  No CARGO_HOME override.
+#     Run this before opening a pull request.
+#
+#   make ci-full    — Full pipeline: ci-local + ci-asan + ci-miri + builder image
+#     (full QEMU compile) + all smoke phases run sequentially inside the builder.
+#     This is the authoritative "will GitHub be green?" answer.
+#     Run this before merging to main.
+#
+# Mount strategy for all 'docker run devenv-base' invocations:
+#
+#   /workspace (bind-mount $(CURDIR))
+#     Source code + generated Python .venv-docker + test-results.
+#     The host's own 'target/' directory is NOT used by the container.
+#
+#   CARGO_TARGET_DIR=/tmp/ci-target  (ephemeral inside the container)
+#     Compiled Rust artifacts stay inside the container and disappear when it
+#     exits.  This is the critical fix: sharing target/ between environments
+#     with different CARGO_HOME values corrupts Cargo's fingerprint cache and
+#     causes "can't find crate" errors on proc-macro crates.
+#
+#   ci-cargo-registry (named Docker volume → /usr/local/cargo/registry)
+#     Crate source tarballs are cached in a named volume that persists across
+#     'docker run' calls without ever touching the host filesystem.  The
+#     container's own /usr/local/cargo is used (matching GitHub CI exactly —
+#     GitHub's docker run also carries no CARGO_HOME override).
+#
+#   UV_PROJECT_ENVIRONMENT=/workspace/.venv-docker
+#     Python venv isolated from the host's .venv so tool versions don't bleed.
 # ------------------------------------------------------------------------------
 
 ci-local:
 	@echo "════════════════════════════════════════════════════"
-	@echo "  CI Tier 1 — Running Lints & Unit Tests inside container"
+	@echo "  CI Tier 1 — GitHub-identical: lint → build-tools → test-unit"
 	@echo "════════════════════════════════════════════════════"
 	@bash scripts/docker-build.sh devenv-base
 	@echo ""
-	# Run lints and unit tests strictly inside the devenv-base container.
-	# We map the current host user's UID/GID into the container to ensure that 
-	# any generated files (like .venv) are owned by YOU, not root.
-	@mkdir -p $(CARGO_CACHE_DIR)
+	# Mirrors the three 'docker run devenv-base' steps from .github/workflows/ci.yml.
+	# CARGO_HOME is NOT overridden — container uses its baked-in /usr/local/cargo,
+	# exactly as GitHub CI does.  See mount strategy comment above for full details.
 	docker run --rm \
 		--user $$(id -u):$$(id -g) \
 		-e HOME=/tmp \
 		-e USER=vscode \
-		-e CARGO_HOME=/workspace/.cargo-cache \
-		-e VIRTMUC_SKIP_QEMU_HEADERS_WARNING=1 \
+		-e CARGO_TARGET_DIR=/tmp/ci-target \
+		-e VIRTMCU_SKIP_QEMU_HEADERS_WARNING=1 \
 		-e UV_PROJECT_ENVIRONMENT=/workspace/.venv-docker \
-		-v "$(CURDIR):/workspace" -w /workspace \
-		$(DEVENV_BASE_IMG) bash -c "make lint && make test-unit"
+		-v "$(CURDIR):/workspace" \
+		-v ci-cargo-registry:/usr/local/cargo/registry \
+		-w /workspace \
+		$(DEVENV_BASE_IMG) bash -c "make lint && make build-tools && make test-unit"
 	@echo ""
-	@echo "✓ ci-local passed (parity with GitHub CI Tier 1)."
-	@echo "  To run the full pipeline (builder ~40 min + integration tests): make ci-full"
+	@echo "✓ ci-local passed (1:1 with GitHub CI Tier 1)."
+	@echo "  To run the full pipeline (builder ~40 min + all smoke phases): make ci-full"
 
 # Run host-side C coverage for peripheral plugins (inside builder)
 test-coverage-peripheral:
@@ -515,16 +547,17 @@ ci-asan:
 	@echo "════════════════════════════════════════════════════"
 	@echo "  CI ASan — Building and testing under ASan"
 	@echo "════════════════════════════════════════════════════"
-	@mkdir -p $(CARGO_CACHE_DIR)
 	docker run --rm \
 		--user $$(id -u):$$(id -g) \
 		-e HOME=/tmp \
 		-e USER=vscode \
-		-e CARGO_HOME=/workspace/.cargo-cache \
-		-e VIRTMUC_SKIP_QEMU_HEADERS_WARNING=1 \
+		-e CARGO_TARGET_DIR=/tmp/ci-target \
+		-e VIRTMCU_SKIP_QEMU_HEADERS_WARNING=1 \
 		-e UV_PROJECT_ENVIRONMENT=/workspace/.venv-docker \
 		-e VIRTMCU_STALL_TIMEOUT_MS=300000 \
-		-v "$(CURDIR):/workspace" -w /workspace \
+		-v "$(CURDIR):/workspace" \
+		-v ci-cargo-registry:/usr/local/cargo/registry \
+		-w /workspace \
 		$(DEVENV_BASE_IMG) make test-asan
 	@echo ""
 	@echo "✓ ci-asan passed."
@@ -539,8 +572,12 @@ ci-miri:
 	@echo "  CI Miri — Running Miri tests"
 	@echo "════════════════════════════════════════════════════"
 	docker run --rm \
+		--user $$(id -u):$$(id -g) \
+		-e HOME=/tmp \
+		-e USER=vscode \
+		-e CARGO_TARGET_DIR=/tmp/ci-target \
 		-v "$(CURDIR):/workspace" \
-		-v /workspace/third_party \
+		-v ci-cargo-registry:/usr/local/cargo/registry \
 		-w /workspace \
 		$(DEVENV_BASE_IMG) make test-miri
 	@echo ""
@@ -576,6 +613,37 @@ docker-builder:
 
 docker-runtime:
 	@bash scripts/docker-build.sh runtime
+
+# ------------------------------------------------------------------------------
+# Release
+# ------------------------------------------------------------------------------
+# Create an annotated git tag, record the version in VERSION, and push both
+# the commit and the tag.  GitHub CI then publishes versioned container images
+# (devenv:vMAJOR.MINOR.PATCH, runtime:vMAJOR.MINOR.PATCH, per-arch variants)
+# and creates a GitHub Release with QEMU tarballs and the Python wheel.
+#
+# Usage:
+#   make tag VERSION=v1.2.3
+#
+# Prerequisites: clean working tree, on the main branch, tag must not exist yet.
+
+tag:
+	@test -n "$(VERSION)" || (echo "Usage: make tag VERSION=v1.2.3" && exit 1)
+	@echo "$(VERSION)" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$$' || \
+		(echo "❌ VERSION must match vMAJOR.MINOR.PATCH (got: $(VERSION))" && exit 1)
+	@test -z "$$(git status --porcelain)" || \
+		(echo "❌ Working tree is dirty — commit or stash changes before releasing" && exit 1)
+	@test "$$(git rev-parse --abbrev-ref HEAD)" = "main" || \
+		(echo "❌ Releases must be tagged from the main branch" && exit 1)
+	@git rev-parse $(VERSION) >/dev/null 2>&1 && \
+		(echo "❌ Tag $(VERSION) already exists" && exit 1) || true
+	@echo "$(VERSION)" | sed 's/^v//' > VERSION
+	@git add VERSION
+	@git commit -m "chore: release $(VERSION)"
+	@git tag -a $(VERSION) -m "Release $(VERSION)"
+	@git push origin main $(VERSION)
+	@echo "✓ Tagged and pushed $(VERSION)"
+	@echo "  CI will publish versioned images and create a GitHub Release automatically."
 
 # ------------------------------------------------------------------------------
 # Clean
