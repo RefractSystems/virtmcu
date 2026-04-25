@@ -236,7 +236,6 @@ RUN mkdir -p qemu/hw/virtmcu \
     && grep -q "subdir('virtmcu')" qemu/hw/meson.build || echo "subdir('virtmcu')" >> qemu/hw/meson.build
 
 ARG USE_CCACHE=false
-ARG CI=false
 ENV CCACHE_DIR=/var/cache/ccache \
     CCACHE_MAXSIZE=2G \
     CCACHE_SLOPPINESS=time_macros,include_file_mtime
@@ -258,8 +257,7 @@ RUN if [ "${USE_CCACHE}" = "true" ]; then CCACHE_FLAG="--enable-ccache"; else CC
     --disable-dbus-display \
     --extra-ldflags="-fuse-ld=lld -rdynamic"
 RUN --mount=type=cache,target=/var/cache/ccache \
-    if [ "$CI" = "true" ]; then JOBS=1; else JOBS=$(nproc); fi && \
-    make -j"$JOBS"
+    make -j"$(nproc)"
 
 # ── Stage 6: builder ──────────────────────────────────────────────────────────
 FROM qemu-builder AS builder
@@ -274,14 +272,12 @@ RUN rm -rf /build/qemu/hw/virtmcu && ln -sf /build/virtmcu/hw /build/qemu/hw/vir
 
 WORKDIR /build/qemu/build-virtmcu
 ARG VIRTMCU_USE_ASAN=0
-ARG CI=false
 ARG TARGETARCH
 # hadolint ignore=SC2016
 RUN --mount=type=cache,target=/var/cache/ccache \
     --mount=type=cache,id=cargo-target-qom-${TARGETARCH},target=/build/qemu/build-virtmcu/hw/virtmcu/target-v2 \
     --mount=type=cache,id=cargo-registry-${TARGETARCH},target=/usr/local/cargo/registry \
-    if [ "$CI" = "true" ]; then JOBS=1; else JOBS=$(nproc); fi && \
-    VIRTMCU_USE_ASAN=${VIRTMCU_USE_ASAN} make -j"$JOBS" \
+    VIRTMCU_USE_ASAN=${VIRTMCU_USE_ASAN} make -j"$(nproc)" \
     && make install
 
 # Build the test tools (zenoh_coordinator, mujoco_bridge, resd_replay) here in

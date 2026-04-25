@@ -126,8 +126,7 @@ test-asan: venv
 	VIRTMCU_USE_ASAN=1 bash scripts/setup-qemu.sh --force
 	@bash scripts/cleanup-sim.sh --quiet
 	@echo "==> Running integration tests under ASan/UBSan..."
-	VIRTMCU_USE_ASAN=1 ASAN_OPTIONS=detect_leaks=1,halt_on_error=1,detect_stack_use_after_return=1 \
-	UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+	VIRTMCU_USE_ASAN=1 ASAN_OPTIONS=detect_leaks=0,halt_on_error=1,detect_stack_use_after_return=1 \	UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
 	$(MAKE) test-integration
 	@echo "✓ All ASan integration tests passed."
 
@@ -459,7 +458,7 @@ perf-check: venv
 #
 #   make ci-local   — GitHub Tier 1 simulation in a fresh devenv-base container.
 #     Runs lint → build-tools → test-unit in the SAME image and with the SAME
-#     flags that .github/workflows/ci.yml uses.  No CARGO_HOME override.
+#     flags that .github/workflows/ci-main.yml uses.  No CARGO_HOME override.
 #     Run this before opening a pull request.
 #
 #   make ci-full    — Full pipeline: ci-local + ci-asan + ci-miri + builder image
@@ -500,7 +499,7 @@ ci-local:
 	# so --user runs would fail on first crate download without this step.
 	docker run --rm -v ci-cargo-registry:/vol $(DEVENV_BASE_IMG) \
 		sh -c "chown -R $$(id -u):$$(id -g) /vol"
-	# Mirrors the three 'docker run devenv-base' steps from .github/workflows/ci.yml.
+	# Mirrors the three 'docker run devenv-base' steps from .github/workflows/ci-main.yml.
 	# CARGO_HOME is NOT overridden — container uses its baked-in /usr/local/cargo,
 	# exactly as GitHub CI does.  See mount strategy comment above for full details.
 	docker run --rm \

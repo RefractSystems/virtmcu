@@ -244,7 +244,7 @@ There are three escalating local gates; each is a strict superset of the previou
 | Gate | When to run | What it does |
 |---|---|---|
 | **Hooks** (`make lint && make test-unit`) | Every commit/push automatically | Runs directly in the devcontainer — no Docker spawn. Fast (~3-5 min). |
-| **`make ci-local`** | Before opening a PR | Builds `devenv-base` locally and runs the identical three `docker run` steps that `.github/workflows/ci.yml` executes: `lint → build-tools → test-unit`. |
+| **`make ci-local`** | Before opening a PR | Builds `devenv-base` locally and runs the identical three `docker run` steps that `.github/workflows/ci-main.yml` executes: `lint → build-tools → test-unit`. |
 | **`make ci-full`** | Before merging to main | `ci-local` + ASan + Miri + full `builder` Docker image + all smoke phases run sequentially. Authoritative "will GitHub be green?" answer. |
 
 **Why hooks run directly (not inside Docker):** The devcontainer IS `devenv-base`. Running `make lint` directly in the devcontainer is identical toolchain coverage without the CARGO_HOME conflict that corrupted Cargo's fingerprint cache. Reserve `make ci-local` for the containerised simulation.
