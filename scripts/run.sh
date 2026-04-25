@@ -24,12 +24,15 @@
 #   Any other arguments are passed directly to qemu-system-arm.
 # ==============================================================================
 
-set -e
+set -euo pipefail
 
 # Resolve paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_DIR="$(dirname "$SCRIPT_DIR")"
 QEMU_DIR="$WORKSPACE_DIR/third_party/qemu"
+
+# Inherit optional env vars with safe defaults for -u compatibility
+VIRTMCU_SKIP_BUILD_DIR="${VIRTMCU_SKIP_BUILD_DIR:-}"
 
 # Default architecture
 ARCH="arm"
@@ -57,6 +60,7 @@ IS_TEMP_DTB=false
 EXTRA_ARGS=()
 KERNEL=""
 MACHINE_PROVIDED=false
+INPUT_FILE=""
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -178,7 +182,7 @@ fi
 FOUND_SO=""
 if [[ "$VIRTMCU_SKIP_BUILD_DIR" != "1" ]]; then
     # Search for the freshest plugin in the entire build tree
-    FOUND_SO=$(find "$QEMU_DIR/build-virtmcu" -name "hw-virtmcu-*.so" -type f -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -f2- -d" ")
+    FOUND_SO=$(find "$QEMU_DIR/build-virtmcu" -name "hw-virtmcu-*.so" -type f -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -f2- -d" " || true)
 fi
 
 if [ -n "$FOUND_SO" ]; then
@@ -293,7 +297,7 @@ export QEMU_MODULE_DIR
 # Automatically handle ASan LD_PRELOAD if QEMU is instrumented.
 # AddressSanitizer requires that its runtime library be loaded first.
 if ldd "$QEMU_BIN" | grep -q "libasan"; then
-    LIBASAN=$(ldd "$QEMU_BIN" | grep "libasan" | awk '{print $3}')
+    LIBASAN=$(ldd "$QEMU_BIN" | grep "libasan" | awk '{print $3}' || true)
     if [ -n "$LIBASAN" ] && [ -f "$LIBASAN" ]; then
         export LD_PRELOAD="$LIBASAN${LD_PRELOAD:+:$LD_PRELOAD}"
     fi

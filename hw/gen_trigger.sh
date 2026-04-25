@@ -1,5 +1,6 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # Generate trigger .c file for QEMU modules
+set -euo pipefail
 OUT="$1"
 OBJ="$2"
 EXTRA_INC="$3"

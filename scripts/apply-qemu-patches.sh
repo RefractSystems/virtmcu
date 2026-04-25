@@ -9,9 +9,9 @@
 #   scripts/apply-qemu-patches.sh <path_to_qemu_src>
 # ==============================================================================
 
-set -e
+set -euo pipefail
 
-QEMU_DIR="$1"
+QEMU_DIR="${1:-}"
 if [ -z "$QEMU_DIR" ] || [ ! -d "$QEMU_DIR" ]; then
     echo "Usage: $0 <path_to_qemu_src>"
     exit 1

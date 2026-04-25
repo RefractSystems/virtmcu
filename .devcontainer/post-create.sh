@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
 echo "==> Configuring Git..."
 git config --global credential.https://github.com.helper ''

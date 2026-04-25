@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
 echo "==> Seeding Claude configuration..."
 HOST_CLAUDE_JSON="/home/vscode/.claude.json.host"

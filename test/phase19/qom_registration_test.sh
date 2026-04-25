@@ -1,5 +1,5 @@
 #!/bin/bash
-set -ex
+set -euo pipefail
 
 echo "Rebuilding QEMU to include test-qom-device..."
 make -C third_party/qemu/build-virtmcu install

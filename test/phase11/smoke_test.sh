@@ -11,7 +11,7 @@
 #   3. Capture serial output in a temp file and assert "HI RV" is present.
 # ==============================================================================
 
-set -e
+set -euo pipefail
 
 echo "=============================================================================="
 echo "🧪 RUNNING TEST: $(basename "$0")"

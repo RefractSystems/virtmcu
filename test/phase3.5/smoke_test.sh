@@ -6,7 +6,7 @@
 # a .yaml file, generates a DTB, and verifies that QEMU can boot and print "HI".
 # ==============================================================================
 
-set -e
+set -euo pipefail
 
 echo "=============================================================================="
 echo "🧪 RUNNING TEST: $(basename "$0")"

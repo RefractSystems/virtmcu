@@ -12,7 +12,7 @@
 #   6. Compiles and installs the QEMU binaries to `third_party/qemu/build-virtmcu/install`.
 # ==============================================================================
 
-set -e
+set -euo pipefail
 
 # Determine absolute paths for the script, workspace, and QEMU directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,6 +23,11 @@ if [ -f "$WORKSPACE_DIR/BUILD_DEPS" ]; then
     # shellcheck source=/dev/null
     source "$WORKSPACE_DIR/BUILD_DEPS"
 fi
+
+# Inherit optional env vars with safe defaults for -u compatibility
+CI="${CI:-}"
+VIRTMCU_USE_CCACHE="${VIRTMCU_USE_CCACHE:-}"
+VIRTMCU_USE_ASAN="${VIRTMCU_USE_ASAN:-}"
 
 # Function to download pre-built QEMU SDK from GitHub Releases
 download_prebuilt_qemu() {

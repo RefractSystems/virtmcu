@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -ex
+set -euo pipefail
 
 # $1: rust source dir (hw/rust)
 # $2: target dir (hw/target or similar)

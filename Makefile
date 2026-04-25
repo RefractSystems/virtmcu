@@ -284,6 +284,13 @@ lint-shell:
 	@echo "==> shellcheck..."
 	@shellcheck --version >/dev/null 2>&1 || { echo "❌ Error: shellcheck is not installed. Install with: sudo apt-get install shellcheck"; exit 1; }
 	@find . -type f -name "*.sh" -not -path "*/third_party/*" -not -path "*/.venv/*" -not -path "*/build/*" -not -path "*/.cargo-cache/*" -print0 | xargs -0 shellcheck --severity=warning
+	@echo "==> Checking bash safety flags (set -euo pipefail)..."
+	@MISSING=$$(find . -type f -name "*.sh" -not -path "*/third_party/*" -not -path "*/.venv/*" -not -path "*/build/*" -not -path "*/.cargo-cache/*" -print0 | xargs -0 grep -rL "set -euo pipefail" 2>/dev/null || true); \
+	if [ -n "$$MISSING" ]; then \
+		echo "❌ Error: Missing 'set -euo pipefail' in:"; \
+		echo "$$MISSING"; \
+		exit 1; \
+	fi
 	@echo "✓ shellcheck passed."
 
 
