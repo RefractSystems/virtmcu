@@ -1,5 +1,5 @@
 #!/bin/bash
-set -ex
+set -euo pipefail
 
 echo "Rebuilding QEMU to include test-qom-device..."
 make -C third_party/qemu/build-virtmcu install
@@ -13,6 +13,6 @@ if third_party/qemu/build-virtmcu/install/bin/qemu-system-arm -device help 2>&1 
     exit 0
 else
     echo "FAILED: test-rust-device not found in QEMU help."
-    third_party/qemu/build-virtmcu/install/bin/qemu-system-arm -device help 2>&1 | grep test
+    third_party/qemu/build-virtmcu/install/bin/qemu-system-arm -device help 2>&1 | grep test || true
     exit 1
 fi

@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-set -ex
+set -euo pipefail
 
 # $1: rust source dir (hw/rust)
 # $2: target dir (hw/target or similar)
 # $3: out dir (where .a files should go)
 # rest: pairs of "package-name:libname.a"
 
-RUST_DIR="$1"
-TARGET_DIR="$2"
-OUT_DIR="$3"
+RUST_DIR="${1:-}"
+TARGET_DIR="${2:-}"
+OUT_DIR="${3:-}"
 shift 3
 
 cd "$RUST_DIR"

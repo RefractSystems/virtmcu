@@ -235,7 +235,6 @@ RUN mkdir -p qemu/hw/virtmcu \
     && echo "modules += {'hw-virtmcu': hw_virtmcu_modules}" >> qemu/hw/virtmcu/meson.build \
     && grep -q "subdir('virtmcu')" qemu/hw/meson.build || echo "subdir('virtmcu')" >> qemu/hw/meson.build
 
-# Opt-in ccache support for local builds
 ARG USE_CCACHE=false
 ENV CCACHE_DIR=/var/cache/ccache \
     CCACHE_MAXSIZE=2G \
@@ -257,7 +256,8 @@ RUN if [ "${USE_CCACHE}" = "true" ]; then CCACHE_FLAG="--enable-ccache"; else CC
     --disable-docs \
     --disable-dbus-display \
     --extra-ldflags="-fuse-ld=lld -rdynamic"
-RUN --mount=type=cache,target=/var/cache/ccache make -j"$(nproc)"
+RUN --mount=type=cache,target=/var/cache/ccache \
+    make -j"$(nproc)"
 
 # ── Stage 6: builder ──────────────────────────────────────────────────────────
 FROM qemu-builder AS builder
@@ -267,7 +267,6 @@ COPY hw/ /build/virtmcu/hw/
 COPY tools/ /build/virtmcu/tools/
 RUN rm -rf /build/qemu/hw/virtmcu && ln -sf /build/virtmcu/hw /build/qemu/hw/virtmcu \
     && grep -q "subdir('virtmcu')" /build/qemu/hw/meson.build || echo "subdir('virtmcu')" >> /build/qemu/hw/meson.build \
-    && touch /build/qemu/meson.build \
     && ln -sf /build/virtmcu/Cargo.toml /build/qemu/hw/Cargo.toml \
     && ln -sf /build/virtmcu/Cargo.lock /build/qemu/hw/Cargo.lock
 

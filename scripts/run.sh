@@ -24,12 +24,15 @@
 #   Any other arguments are passed directly to qemu-system-arm.
 # ==============================================================================
 
-set -e
+set -euo pipefail
 
 # Resolve paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_DIR="$(dirname "$SCRIPT_DIR")"
 QEMU_DIR="$WORKSPACE_DIR/third_party/qemu"
+
+# Inherit optional env vars with safe defaults for -u compatibility
+VIRTMCU_SKIP_BUILD_DIR="${VIRTMCU_SKIP_BUILD_DIR:-}"
 
 # Default architecture
 ARCH="arm"
@@ -57,6 +60,7 @@ IS_TEMP_DTB=false
 EXTRA_ARGS=()
 KERNEL=""
 MACHINE_PROVIDED=false
+INPUT_FILE=""
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -178,20 +182,20 @@ fi
 FOUND_SO=""
 if [[ "$VIRTMCU_SKIP_BUILD_DIR" != "1" ]]; then
     # Search for the freshest plugin in the entire build tree
-    FOUND_SO=$(find "$QEMU_DIR/build-virtmcu" -name "hw-virtmcu-*.so" -type f -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -f2- -d" ")
+    FOUND_SO=$(find "$QEMU_DIR/build-virtmcu" -name "hw-virtmcu-*.so" -type f -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -f2- -d" " || true)
 fi
 
 if [ -n "$FOUND_SO" ]; then
     QEMU_MODULE_DIR=$(dirname "$FOUND_SO")
-elif [[ "$VIRTMCU_SKIP_BUILD_DIR" != "1" ]] && [ -d "$QEMU_DIR/build-virtmcu/install/lib/aarch64-linux-gnu/qemu" ] && ls "$QEMU_DIR/build-virtmcu/install/lib/aarch64-linux-gnu/qemu"/hw-virtmcu-*.so >/dev/null 2>&1; then
+elif [[ "$VIRTMCU_SKIP_BUILD_DIR" != "1" ]] && [ -d "$QEMU_DIR/build-virtmcu/install/lib/aarch64-linux-gnu/qemu" ] && ls "$QEMU_DIR/build-virtmcu/install/lib/aarch64-linux-gnu/qemu"/hw-virtmcu-*.so* >/dev/null 2>&1; then
     QEMU_MODULE_DIR="$QEMU_DIR/build-virtmcu/install/lib/aarch64-linux-gnu/qemu"
-elif [[ "$VIRTMCU_SKIP_BUILD_DIR" != "1" ]] && [ -d "$QEMU_DIR/build-virtmcu/install/lib/qemu" ] && ls "$QEMU_DIR/build-virtmcu/install/lib/qemu"/hw-virtmcu-*.so >/dev/null 2>&1; then
+elif [[ "$VIRTMCU_SKIP_BUILD_DIR" != "1" ]] && [ -d "$QEMU_DIR/build-virtmcu/install/lib/qemu" ] && ls "$QEMU_DIR/build-virtmcu/install/lib/qemu"/hw-virtmcu-*.so* >/dev/null 2>&1; then
     QEMU_MODULE_DIR="$QEMU_DIR/build-virtmcu/install/lib/qemu"
-elif [ -d "/opt/virtmcu/lib/aarch64-linux-gnu/qemu" ] && ls /opt/virtmcu/lib/aarch64-linux-gnu/qemu/hw-virtmcu-*.so >/dev/null 2>&1; then
+elif [ -d "/opt/virtmcu/lib/aarch64-linux-gnu/qemu" ] && ls /opt/virtmcu/lib/aarch64-linux-gnu/qemu/hw-virtmcu-*.so* >/dev/null 2>&1; then
     QEMU_MODULE_DIR="/opt/virtmcu/lib/aarch64-linux-gnu/qemu"
-elif [ -d "/opt/virtmcu/lib/x86_64-linux-gnu/qemu" ] && ls /opt/virtmcu/lib/x86_64-linux-gnu/qemu/hw-virtmcu-*.so >/dev/null 2>&1; then
+elif [ -d "/opt/virtmcu/lib/x86_64-linux-gnu/qemu" ] && ls /opt/virtmcu/lib/x86_64-linux-gnu/qemu/hw-virtmcu-*.so* >/dev/null 2>&1; then
     QEMU_MODULE_DIR="/opt/virtmcu/lib/x86_64-linux-gnu/qemu"
-elif [ -d "/opt/virtmcu/lib/qemu" ] && ls /opt/virtmcu/lib/qemu/hw-virtmcu-*.so >/dev/null 2>&1; then
+elif [ -d "/opt/virtmcu/lib/qemu" ] && ls /opt/virtmcu/lib/qemu/hw-virtmcu-*.so* >/dev/null 2>&1; then
     QEMU_MODULE_DIR="/opt/virtmcu/lib/qemu"
 else
     # Final fallback: only if not skipping build dir
@@ -208,7 +212,7 @@ has_asan() {
     local file="$1"
     if [ ! -f "$file" ]; then return 1; fi
     # Check for ASan initialization symbols which indicate instrumentation
-    if strings "$file" 2>/dev/null | grep -q "__asan_init"; then
+    if strings "$file" 2>/dev/null | grep "__asan_init" >/dev/null; then
         return 0
     fi
     return 1
@@ -292,8 +296,8 @@ export QEMU_MODULE_DIR
 
 # Automatically handle ASan LD_PRELOAD if QEMU is instrumented.
 # AddressSanitizer requires that its runtime library be loaded first.
-if ldd "$QEMU_BIN" | grep -q "libasan"; then
-    LIBASAN=$(ldd "$QEMU_BIN" | grep "libasan" | awk '{print $3}')
+if ldd "$QEMU_BIN" | grep "libasan" >/dev/null; then
+    LIBASAN=$(ldd "$QEMU_BIN" | grep "libasan" | awk '{print $3}' || true)
     if [ -n "$LIBASAN" ] && [ -f "$LIBASAN" ]; then
         export LD_PRELOAD="$LIBASAN${LD_PRELOAD:+:$LD_PRELOAD}"
     fi
@@ -314,8 +318,8 @@ if [ "$IS_TEMP_DTB" = true ]; then
     QEMU_PID=$!
     
     # Traps for termination signals
-    trap 'kill -TERM $QEMU_PID 2>/dev/null; wait $QEMU_PID; rm -f "$DTB"; exit 130' INT
-    trap 'kill -TERM $QEMU_PID 2>/dev/null; wait $QEMU_PID; rm -f "$DTB"; exit 143' TERM
+    trap 'kill -TERM $QEMU_PID 2>/dev/null || true; wait $QEMU_PID; rm -f "$DTB"; exit 130' INT
+    trap 'kill -TERM $QEMU_PID 2>/dev/null || true; wait $QEMU_PID; rm -f "$DTB"; exit 143' TERM
     
     wait $QEMU_PID
     exit $?

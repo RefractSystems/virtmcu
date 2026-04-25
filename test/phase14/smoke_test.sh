@@ -2,7 +2,7 @@
 # test/phase14/smoke_test.sh
 # Verifies that Phase 14 wireless devices are correctly parsed and emitted.
 
-set -e
+set -euo pipefail
 
 echo "Testing Phase 14: Wireless & IoT RF Simulation..."
 
