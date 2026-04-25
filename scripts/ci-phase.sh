@@ -22,7 +22,7 @@ if [ "$INSIDE_DOCKER" = "true" ]; then
     # Ensure system dependencies are present for specific phases
     case "$PHASE" in
         5|9|11_3|all)
-            if ! dpkg -l | grep -q libsystemc-dev; then
+            if ! dpkg -l | grep libsystemc-dev >/dev/null; then
                 echo "==> Installing SystemC dependencies..."
                 apt-get update -qq && apt-get install -y -qq --no-install-recommends libsystemc-dev >/dev/null
             fi

@@ -45,7 +45,7 @@ apply_patch_series() {
 
     local attempt
     for attempt in $(seq 1 10); do
-        if ! git status 2>/dev/null | grep -q "am session"; then
+        if ! git status 2>/dev/null | grep "am session" >/dev/null; then
             return 0
         fi
         echo "  [am retry $attempt] applying current patch with git apply..."
@@ -64,7 +64,7 @@ apply_patch_series() {
     return 1
 }
 
-if ! git log >/dev/null 2>&1 || ! git log | grep -q "arm-generic-fdt"; then
+if ! git log >/dev/null 2>&1 || ! git log | grep "arm-generic-fdt" >/dev/null; then
     echo "  -> Applying arm-generic-fdt-v3.mbx..."
     apply_patch_series "$WORKSPACE_DIR/patches/arm-generic-fdt-v3.mbx"
 else

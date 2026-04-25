@@ -212,7 +212,7 @@ has_asan() {
     local file="$1"
     if [ ! -f "$file" ]; then return 1; fi
     # Check for ASan initialization symbols which indicate instrumentation
-    if strings "$file" 2>/dev/null | grep -q "__asan_init"; then
+    if strings "$file" 2>/dev/null | grep "__asan_init" >/dev/null; then
         return 0
     fi
     return 1
@@ -296,7 +296,7 @@ export QEMU_MODULE_DIR
 
 # Automatically handle ASan LD_PRELOAD if QEMU is instrumented.
 # AddressSanitizer requires that its runtime library be loaded first.
-if ldd "$QEMU_BIN" | grep -q "libasan"; then
+if ldd "$QEMU_BIN" | grep "libasan" >/dev/null; then
     LIBASAN=$(ldd "$QEMU_BIN" | grep "libasan" | awk '{print $3}' || true)
     if [ -n "$LIBASAN" ] && [ -f "$LIBASAN" ]; then
         export LD_PRELOAD="$LIBASAN${LD_PRELOAD:+:$LD_PRELOAD}"
