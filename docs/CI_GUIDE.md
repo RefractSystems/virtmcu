@@ -138,18 +138,15 @@ Previously the Dockerfile capped parallel jobs to 1 in CI (`if [ "$CI" = "true" 
 changes ──┬──────────────────────────────────────────────────────┐
           │ (skip if only docs/md changed)                       │
           ▼                                                       ▼
-     tier1-checks          setup (arches = ["amd64"])
-     (lint + unit)              │
-          │                     ▼
-          └──────────► build-qemu (amd64)
-                            │
-                 ┌──────────┴──────────┐
-                 ▼                     ▼
-           smoke-tests          firmware-coverage
-           (20 phases)
-                 │
-                 ▼
-         peripheral-coverage
+     tier1-checks          generate-matrix ────────────► build-qemu (amd64)
+     (lint + unit)     (reads smoke-phases.json)               │
+          │                     │                   ┌──────────┴──────────┐
+          └─────────────────────┴──────────────────►▼                     ▼
+                                              smoke-tests          firmware-coverage
+                                              (N phases, amd64)
+                                                    │
+                                                    ▼
+                                            peripheral-coverage
 ```
 
 No publish jobs. The builder image is pushed to GHCR tagged `sha-<sha>-amd64` so smoke-test runners can pull it without rebuilding. The SHA tag is ephemeral — it is never promoted to `latest`.
@@ -160,30 +157,26 @@ No publish jobs. The builder image is pushed to GHCR tagged `sha-<sha>-amd64` so
 changes ──┬──────────────────────────────────────────────────────────────────┐
           │ (skip if only docs/md changed, unless it's a tag)               │
           ▼                                                                   ▼
-     tier1-checks          setup (arches = ["amd64","arm64"])
-     (lint + unit)              │
-          │                     ▼
-          │          build-qemu (amd64 + arm64 in parallel)
-          │                     │
-          ▼                     │
-  publish-devenv-base ──────────┤
-  (amd64 + arm64)               │
-          │                     │
-          ▼                     │
-   publish-devenv               │
-   (amd64 + arm64)              ▼
-          │            smoke-tests (20 phases × 2 arches)
-          ▼                     │
-   merge-devenv                 ├──► firmware-coverage
-   (multi-arch manifest)        │
-                                ▼
-                        peripheral-coverage
-                                │
-                                ▼
-                        publish-runtime (amd64 + arm64)
-                                │
-                                ▼
-                        merge-runtime (multi-arch manifest)
+     tier1-checks    setup ──► build-qemu (amd64 + arm64 in parallel)
+     (lint + unit)                         │
+          │          generate-matrix        │
+          │      (reads smoke-phases.json)  │
+          ▼                │               │
+  publish-devenv-base ─────┘               │
+  (amd64 + arm64)          │               │
+          │                └──────────────►▼
+          ▼                       smoke-tests (N phases × 2 arches)
+   publish-devenv                          │
+   (amd64 + arm64)                         ├──► firmware-coverage
+          │                                │
+          ▼                                ▼
+   merge-devenv                    peripheral-coverage
+   (multi-arch manifest)                   │
+                                           ▼
+                                   publish-runtime (amd64 + arm64)
+                                           │
+                                           ▼
+                                   merge-runtime (multi-arch manifest)
 ```
 
 ### Tier 1 — Static Analysis & Unit Tests
@@ -382,9 +375,9 @@ These are real gaps in the current design, documented here so they are not forgo
 
 `ci-pr.yml` and `ci-main.yml` share ~300 lines of identical step definitions (lint, build-qemu, smoke-tests, coverage jobs). They differ only in triggers, the arch matrix, and whether publish jobs are present.
 
-The SOTA fix is [reusable workflows](https://docs.github.com/en/actions/sharing-automations/reusing-workflows): a `_ci-shared.yml` with `on: workflow_call:` inputs for `arches` and `push_cache`, called by both files. This eliminates the duplication entirely and ensures a step change (e.g., a new smoke phase) is made in exactly one place.
+**Smoke phase duplication is solved**: both workflows now read `.github/smoke-phases.json` via a `generate-matrix` job, so adding or removing a smoke phase requires editing one file only (see §13.6).
 
-Not done yet because it requires restructuring job `needs:` graphs across file boundaries, which needs careful testing against the merge_group trigger specifically.
+The remaining duplication (step-level YAML for lint, build-qemu, coverage) is addressed by [reusable workflows](https://docs.github.com/en/actions/sharing-automations/reusing-workflows): a `_ci-shared.yml` with `on: workflow_call:` inputs for `arches` and `push_cache`, called by both files, would eliminate the rest. Not done yet because it requires restructuring job `needs:` graphs across file boundaries, which needs careful testing against the merge_group trigger specifically.
 
 ### 13.2 ccache persistence across CI runs
 
@@ -411,3 +404,26 @@ The fix: split `build-qemu` into two jobs — `build-qemu-pr` (no cache write, f
 ### 13.5 GHA cache cold start after scope rename
 
 The GHA cache scopes were renamed from `virtmcu-amd64` (shared across all stages) to per-stage names (`virtmcu-builder-amd64`, `virtmcu-toolchain-amd64`, etc.). All existing GHA cache entries under the old scope names were orphaned on deploy. The registry cache (`build-cache:*`) is the primary and repopulates GHA naturally over a few PR runs, so there is no action required — but the first few PRs after the rename will take a full registry pull instead of a GHA hit.
+
+### 13.6 Dynamic smoke matrix (`smoke-phases.json`) — Design and Risks
+
+#### What it does
+
+Both workflows generate the `smoke-tests` matrix at runtime via a `generate-matrix` job that reads `.github/smoke-phases.json` using `jq`. This replaces 20-entry hardcoded `include:` blocks in each workflow file, making `.github/smoke-phases.json` the **single source of truth** for phase names and ordering.
+
+To add or remove a smoke phase: edit `.github/smoke-phases.json` only. Both `ci-pr.yml` and `ci-main.yml` pick up the change automatically on the next run.
+
+#### Known risks and mitigations
+
+**Risk: Branch protection check names are coupled to `name` fields in the JSON.**
+GitHub branch protection "required status checks" are matched by job name string. A job named `Smoke — Phase 7 (Zenoh Clock) (amd64)` in branch protection will break if the `name` field in `smoke-phases.json` is edited — even a cosmetic rename silently removes that check from the protection list, making the branch unprotectable.
+- **Mitigation:** Treat `phase` and `name` fields in `smoke-phases.json` as stable identifiers. Rename only after updating branch protection rules. The `phase` field (used in artifact names and `ci-phase.sh` routing) is the stable key; the `name` field is display-only and change-sensitive for branch protection.
+
+**Risk: `generate-matrix` always runs, even when `changes.expensive == 'false'`.**
+The job does only a checkout + a `jq` call (~10 seconds), so this is negligible. `smoke-tests` still carries `if: needs.changes.outputs.expensive == 'true'` and is skipped when changes don't warrant it. The unconditional `generate-matrix` is intentional: it ensures the matrix output is always available as a job dependency, avoiding the "output from skipped job is empty" failure mode.
+
+**Risk: actionlint cannot statically verify a dynamic matrix.**
+`actionlint` sees `matrix: ${{ fromJson(...) }}` and cannot enumerate valid matrix keys at lint time. It emits warnings for `matrix.name`, `matrix.arch`, `matrix.os`, `matrix.phase` in the job body since they don't appear in a static `matrix:` block. The CI lint step currently does not run `actionlint`; if added in the future, suppress those specific dynamic-matrix warnings with `# actionlint:ignore` comments on the affected lines.
+
+**Risk: `actuator` phase is intentionally absent from the matrix.**
+`ci-phase.sh all` runs the actuator phase locally, but `smoke-phases.json` deliberately excludes it from the CI matrix (it has infrastructure prerequisites not available on GitHub runners). Any contributor adding `actuator` to `smoke-phases.json` must also ensure the builder image includes those prerequisites.

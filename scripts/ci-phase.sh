@@ -3,7 +3,8 @@
 # scripts/ci-phase.sh - Unified CI Phase Runner
 #
 # This script is the SINGLE SOURCE OF TRUTH for running CI phases.
-# It is used by .github/workflows/ci.yml and the local Makefile.
+# It is used by .github/workflows/ci-pr.yml, ci-main.yml, and the local Makefile.
+# Phase names and ordering are defined in .github/smoke-phases.json.
 # ==============================================================================
 set -euo pipefail
 
