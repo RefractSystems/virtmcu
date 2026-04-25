@@ -35,6 +35,7 @@ PYTHONPATH="$WORKSPACE_DIR" "$WORKSPACE_DIR/scripts/run.sh" \
     -device zenoh-telemetry,node=0 \
     -icount shift=0,align=off,sleep=off &
 QEMU_PID=$!
+trap 'kill -9 $QEMU_PID 2>/dev/null || true; rm -f "$QMP_SOCK"' EXIT
 
 # Wait for QMP socket
 sleep 1
@@ -49,6 +50,4 @@ python3 qom_stress.py "$QMP_SOCK"
 
 # Clean up
 echo "Shutting down QEMU..."
-kill -9 $QEMU_PID || true
-rm -f "$QMP_SOCK"
 echo "Test passed! No data races or crashes detected."

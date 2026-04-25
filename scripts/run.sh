@@ -318,8 +318,8 @@ if [ "$IS_TEMP_DTB" = true ]; then
     QEMU_PID=$!
     
     # Traps for termination signals
-    trap 'kill -TERM $QEMU_PID 2>/dev/null; wait $QEMU_PID; rm -f "$DTB"; exit 130' INT
-    trap 'kill -TERM $QEMU_PID 2>/dev/null; wait $QEMU_PID; rm -f "$DTB"; exit 143' TERM
+    trap 'kill -TERM $QEMU_PID 2>/dev/null || true; wait $QEMU_PID; rm -f "$DTB"; exit 130' INT
+    trap 'kill -TERM $QEMU_PID 2>/dev/null || true; wait $QEMU_PID; rm -f "$DTB"; exit 143' TERM
     
     wait $QEMU_PID
     exit $?

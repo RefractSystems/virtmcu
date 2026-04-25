@@ -6,9 +6,9 @@ set -euo pipefail
 # $3: out dir (where .a files should go)
 # rest: pairs of "package-name:libname.a"
 
-RUST_DIR="$1"
-TARGET_DIR="$2"
-OUT_DIR="$3"
+RUST_DIR="${1:-}"
+TARGET_DIR="${2:-}"
+OUT_DIR="${3:-}"
 shift 3
 
 cd "$RUST_DIR"
