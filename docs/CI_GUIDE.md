@@ -276,9 +276,10 @@ This section exists so agents and humans never repeat the same mistake.
 
 Cargo embeds the registry source path in every `.rlib` fingerprint. When `make ci-local` overrode `CARGO_HOME` to `/workspace/.cargo-cache` but mounted the same `/workspace/target` that the devcontainer had compiled against `/usr/local/cargo`, Cargo saw the existing `.rlib` files as belonging to a different registry and tried to recompile. Partial downloads (from interrupted runs) left the registry in an inconsistent state. Result: "can't find crate for `proc_macro2`" errors that disappeared after `rm -rf /workspace/.cargo-cache/registry` — until the next interrupted run.
 
-**The fix has two parts:**
-1. `CARGO_TARGET_DIR=/tmp/ci-target` — compiled artifacts stay inside the container and vanish on exit. The host `target/` is never touched.
-2. Named volume `ci-cargo-registry` at `/usr/local/cargo/registry` — crate downloads persist across `docker run` invocations without a host-path bind that the devcontainer also writes to.
+**The fix has three parts:**
+1. `CARGO_TARGET_DIR=/tmp/ci-target` — for `make ci-local` and docker-in-docker steps, compiled artifacts stay inside the container and vanish on exit.
+2. Named volume `ci-cargo-registry` at `/usr/local/cargo/registry` — crate downloads persist across `docker run` invocations without a host-path bind.
+3. **Devcontainer Volumes** — The `.devcontainer.json` mounts named volumes over `/workspace/target` and `/usr/local/cargo/registry`. This prevents the host machine's `rust-analyzer` from concurrently compiling and corrupting the devcontainer's registry cache via the hypervisor bind mount.
 
 **Rule:** Never add `-e CARGO_HOME=<host-path>` to a `docker run` that also mounts the workspace. If you need to cache downloads across runs, use a named Docker volume.
 
