@@ -77,6 +77,7 @@ target "_common" {
     FLATCC_VERSION        = FLATCC_VERSION
     USE_CCACHE            = USE_CCACHE
     VIRTMCU_USE_ASAN      = "${VIRTMCU_USE_ASAN}"
+    CI                    = CI
   }
 }
 

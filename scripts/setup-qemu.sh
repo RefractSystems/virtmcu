@@ -122,9 +122,10 @@ elif [ ! -d "$ZENOHC_DIR/include" ]; then
         echo "Unsupported architecture for prebuilt Zenoh-C: $ARCH"
         exit 1
     fi
+    rm -rf "$ZENOHC_DIR"
     mkdir -p "$ZENOHC_DIR"
     curl -L "$ZENOHC_URL" -o /tmp/zenoh-c.zip
-    unzip -q /tmp/zenoh-c.zip -d "$ZENOHC_DIR"
+    unzip -q -o /tmp/zenoh-c.zip -d "$ZENOHC_DIR"
     rm /tmp/zenoh-c.zip
 fi
 
@@ -227,8 +228,15 @@ fi
 
 ../configure "${CONFIGURE_ARGS[@]}"
 
-# Compile QEMU using all available CPU cores
-make -j"$(nproc)"
+# Compile QEMU. In CI environments, we limit parallelism to 1 to prevent OOM
+# during heavy compilation (debug + gcov) on standard 2-core runners.
+if [ "$CI" = "true" ]; then
+    JOBS=1
+else
+    JOBS=$(nproc)
+fi
+
+make -j"$JOBS"
 # Install QEMU binaries to the prefix directory (build-virtmcu/install)
 make install
 echo "QEMU build and install completed successfully."

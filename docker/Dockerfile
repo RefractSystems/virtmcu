@@ -235,8 +235,8 @@ RUN mkdir -p qemu/hw/virtmcu \
     && echo "modules += {'hw-virtmcu': hw_virtmcu_modules}" >> qemu/hw/virtmcu/meson.build \
     && grep -q "subdir('virtmcu')" qemu/hw/meson.build || echo "subdir('virtmcu')" >> qemu/hw/meson.build
 
-# Opt-in ccache support for local builds
 ARG USE_CCACHE=false
+ARG CI=false
 ENV CCACHE_DIR=/var/cache/ccache \
     CCACHE_MAXSIZE=2G \
     CCACHE_SLOPPINESS=time_macros,include_file_mtime
@@ -257,7 +257,9 @@ RUN if [ "${USE_CCACHE}" = "true" ]; then CCACHE_FLAG="--enable-ccache"; else CC
     --disable-docs \
     --disable-dbus-display \
     --extra-ldflags="-fuse-ld=lld -rdynamic"
-RUN --mount=type=cache,target=/var/cache/ccache make -j"$(nproc)"
+RUN --mount=type=cache,target=/var/cache/ccache \
+    if [ "$CI" = "true" ]; then JOBS=1; else JOBS=$(nproc); fi && \
+    make -j"$JOBS"
 
 # ── Stage 6: builder ──────────────────────────────────────────────────────────
 FROM qemu-builder AS builder
@@ -267,18 +269,19 @@ COPY hw/ /build/virtmcu/hw/
 COPY tools/ /build/virtmcu/tools/
 RUN rm -rf /build/qemu/hw/virtmcu && ln -sf /build/virtmcu/hw /build/qemu/hw/virtmcu \
     && grep -q "subdir('virtmcu')" /build/qemu/hw/meson.build || echo "subdir('virtmcu')" >> /build/qemu/hw/meson.build \
-    && touch /build/qemu/meson.build \
     && ln -sf /build/virtmcu/Cargo.toml /build/qemu/hw/Cargo.toml \
     && ln -sf /build/virtmcu/Cargo.lock /build/qemu/hw/Cargo.lock
 
 WORKDIR /build/qemu/build-virtmcu
 ARG VIRTMCU_USE_ASAN=0
+ARG CI=false
 ARG TARGETARCH
 # hadolint ignore=SC2016
 RUN --mount=type=cache,target=/var/cache/ccache \
     --mount=type=cache,id=cargo-target-qom-${TARGETARCH},target=/build/qemu/build-virtmcu/hw/virtmcu/target-v2 \
     --mount=type=cache,id=cargo-registry-${TARGETARCH},target=/usr/local/cargo/registry \
-    VIRTMCU_USE_ASAN=${VIRTMCU_USE_ASAN} make -j"$(nproc)" \
+    if [ "$CI" = "true" ]; then JOBS=1; else JOBS=$(nproc); fi && \
+    VIRTMCU_USE_ASAN=${VIRTMCU_USE_ASAN} make -j"$JOBS" \
     && make install
 
 # Build the test tools (zenoh_coordinator, mujoco_bridge, resd_replay) here in

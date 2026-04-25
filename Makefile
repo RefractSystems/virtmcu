@@ -22,7 +22,11 @@ export VIRTMCU_USE_CCACHE
 QEMU_SRC  ?= $(CURDIR)/third_party/qemu
 QEMU_BUILD?= $(QEMU_SRC)/build-virtmcu
 # Automatically determine the number of parallel jobs for make
-JOBS      ?= $(shell nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
+ifeq ($(CI),true)
+  JOBS ?= 1
+else
+  JOBS ?= $(shell nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
+endif
 
 .PHONY: all setup-initial build run clean clean-sim clean-debug distclean venv fmt fmt-python fmt-rust fmt-c fmt-meson fmt-yaml lint lint-python lint-python-types lint-rust lint-c lint-shell lint-docker lint-yaml lint-actions lint-meson lint-spelling check-ffi test test-unit test-python test-integration test-robot test-all build-test-artifacts build-tools install-hooks sync-versions check-versions docker-dev docker-all docker-base docker-toolchain docker-devenv docker-builder docker-runtime ci-local ci-full perf-bench perf-check perf-baseline tag
 
@@ -102,7 +106,7 @@ test-integration: venv
 		tools/testing/test_qmp.py tests/test_qmp_bridge.py tests/test_qemu_library_pytest.py \
 		tests/test_phase6.py tests/test_phase7.py \
 		tests/test_phase8.py tests/test_phase10.py tests/test_phase12.py \
-		-v -n auto --tb=short
+		-v -n $(PYTEST_WORKERS) --tb=short --capture=sys
 	@echo "==> Running Legacy Integration Tests (Bash scripts)..."
 
 	@for test_script in test/phase11_3/smoke_test.sh test/phase11/smoke_test.sh \
@@ -139,6 +143,9 @@ test-miri:
 	@echo "✓ Miri tests passed."
 
 
+# Parallelism for pytest (default to auto, can be overridden in CI or hooks)
+PYTEST_WORKERS ?= auto
+
 # Run all Python unit tests (no QEMU required).
 test-unit: venv
 	@echo "==> Running Tier 1 Unit Tests (no QEMU)..."
@@ -148,7 +155,7 @@ test-unit: venv
 		tests/test_fdt_emitter.py tests/test_qmp_bridge.py tests/test_vproto.py \
 		tests/test_telemetry_listener.py tests/test_telemetry_fbs.py tests/test_fake_adapter.py \
 		tests/test_mcp_server/ \
-		-v -n auto --tb=short
+		-v -n $(PYTEST_WORKERS) --tb=short --capture=sys
 
 test: test-unit
 
@@ -259,6 +266,8 @@ lint-audit:
 	fi
 	@echo "✓ Audit checks completed."
 lint-python:
+	@echo "==> Check vproto.py synchronization..."
+	uv run --active python3 scripts/gen_vproto.py --check
 	@echo "==> ruff check..."
 	uv run --active ruff check .
 	@echo "✓ ruff passed."
@@ -352,6 +361,20 @@ lint-rust:
 		exit 1; \
 	fi
 	@echo "✓ No banned thread::sleep found."
+	@echo "==> Checking for banned Mutex<T> in peripheral state structs..."
+	@# std::sync::Mutex<T> is banned in zenoh-* peripheral state structs because every
+	@# caller already holds the BQL, making the Mutex permanently uncontended and its
+	@# presence actively misleading. Use BqlGuarded<T> from virtmcu-qom::sync instead.
+	@# Approved exceptions must carry an inline // MUTEX_EXCEPTION: <reason> comment.
+	@violations=$$(grep -rn "Mutex<" hw/rust/zenoh-*/src/lib.rs | \
+		grep -v "Arc<Mutex\|// MUTEX_EXCEPTION:" || true); \
+	if [ -n "$$violations" ]; then \
+		echo "ERROR: Banned Mutex<T> in peripheral state (use BqlGuarded<T> instead):"; \
+		echo "$$violations"; \
+		echo "  Fix: replace Mutex<T> with BqlGuarded<T> from virtmcu_qom::sync."; \
+		exit 1; \
+	fi
+	@echo "✓ No banned peripheral Mutex<T> found."
 	@echo "==> Running cargo clippy..."
 	@cargo clippy --workspace
 
@@ -396,12 +419,10 @@ install-hooks:
 	@echo "==> Installing Git hooks..."
 	@mkdir -p .git/hooks
 	# Hooks run directly in the current environment (devcontainer or native).
-	# No nested docker spawn — the devcontainer IS devenv-base, so running
-	# directly gives identical toolchain coverage without the CARGO_HOME conflict.
-	# Use 'make ci-local' for the full containerised Tier-1 simulation,
-	# and 'make ci-full' before merging to verify complete parity with GitHub.
-	@printf '#!/bin/sh\nset -e\nmake lint && make test-unit\n' > .git/hooks/pre-commit
-	@printf '#!/bin/sh\nset -e\nmake lint && make test-unit\n' > .git/hooks/pre-push
+	# We set PYTEST_WORKERS=4 to provide parallelism while remaining pipe-safe.
+	# Standard stdin is redirected from /dev/null to prevent interactive hangs.
+	@printf '#!/bin/sh\nset -e\nPYTEST_WORKERS=4 make lint < /dev/null && PYTEST_WORKERS=4 make test-unit < /dev/null\n' > .git/hooks/pre-commit
+	@printf '#!/bin/sh\nset -e\nPYTEST_WORKERS=4 make lint < /dev/null && PYTEST_WORKERS=4 make test-unit < /dev/null\n' > .git/hooks/pre-push
 	@chmod +x .git/hooks/pre-push .git/hooks/pre-commit
 	@echo "✓ hooks installed: pre-commit and pre-push run 'make lint && make test-unit' directly."
 

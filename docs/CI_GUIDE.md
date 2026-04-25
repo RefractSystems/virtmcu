@@ -222,5 +222,25 @@ Tests never use hardcoded ports. Every parallel worker gets its own ephemeral Ze
 | `SIGSEGV` in plugin | FFI layout drift | `scripts/check-ffi.py --fix` |
 | `Address already in use` | Hardcoded port | Switch to `scripts/get-free-port.py` |
 | `Permission denied` in /workspace | UID mismatch in container | `sudo chown -R 1000:1000 .` |
-| CI STALL | Runner load spike | Raise `VIRTMCU_STALL_TIMEOUT_MS` |
+| CI STALL | Runner load spike or ASan overhead | The system automatically scales `VIRTMCU_STALL_TIMEOUT_MS` to 300s under ASan. If stalls persist, check logs for deadlocks or manually raise the env var. |
 | `cyber_bridge` binary not found | Wrong binary name | The `cyber_bridge` package produces `mujoco_bridge` and `resd_replay` — never a binary called `cyber_bridge`. |
+
+---
+
+## 10. Clock Sync & Stall Timeouts
+
+To maintain deterministic co-simulation, `zenoh-clock` enforces a **Stall Timeout**. If QEMU fails to reach a virtual-time boundary within a certain wall-clock window, it reports a STALL (error code 1).
+
+### Enterprise Policy: Environment-Driven Timeouts
+We avoid hardcoding `stall-timeout` in test files. Instead, the system uses a centralized scaling policy:
+
+1. **Default**: 5 seconds (`VIRTMCU_STALL_TIMEOUT_MS=5000`).
+2. **ASan/UBSan**: 300 seconds (5 minutes). This is automatically injected by `tests/conftest.py` when `VIRTMCU_USE_ASAN=1` is detected.
+3. **Manual Override**: You can override this globally by setting the `VIRTMCU_STALL_TIMEOUT_MS` environment variable.
+
+### Why we don't hardcode in tests
+- **Portability**: Different runners have different performance profiles.
+- **Fail-Fast**: Standard runs should fail quickly if a deadlock occurs.
+- **Maintenance**: Changing the global timeout policy happens in one place (`conftest.py`), not in 50 test files.
+
+If you encounter a `RuntimeError: Node X reported CLOCK STALL`, it means QEMU stopped making progress. Check the QEMU logs for BQL deadlocks or extremely slow TCG translation.
