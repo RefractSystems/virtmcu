@@ -126,7 +126,9 @@ test-asan: venv
 	VIRTMCU_USE_ASAN=1 bash scripts/setup-qemu.sh --force
 	@bash scripts/cleanup-sim.sh --quiet
 	@echo "==> Running integration tests under ASan/UBSan..."
-	VIRTMCU_USE_ASAN=1 ASAN_OPTIONS=detect_leaks=0,halt_on_error=1,detect_stack_use_after_return=1 \	UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+	VIRTMCU_USE_ASAN=1 \
+	ASAN_OPTIONS=detect_leaks=0,halt_on_error=1,detect_stack_use_after_return=1 \
+	UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
 	$(MAKE) test-integration
 	@echo "✓ All ASan integration tests passed."
 
