@@ -18,6 +18,7 @@ import zenoh
 
 from tools.testing.utils import mock_execution_delay
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 

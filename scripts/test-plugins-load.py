@@ -26,11 +26,8 @@ logger = logging.getLogger(__name__)
 
 
 def get_free_port() -> int:
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
+    script = WORKSPACE_DIR / "scripts/get-free-port.py"
+    return int(subprocess.check_output([sys.executable, str(script)]).decode().strip())
 
 
 def main() -> int:
