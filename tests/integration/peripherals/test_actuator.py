@@ -15,12 +15,11 @@ import shutil
 from typing import TYPE_CHECKING, Any
 
 import pytest
+import zenoh
 
 if TYPE_CHECKING:
     from pathlib import Path
     from typing import Any
-
-    import zenoh
 
     from tools.testing.virtmcu_test_suite.simulation import Simulation
 
@@ -29,7 +28,12 @@ logger = logging.getLogger(__name__)
 
 
 @pytest.mark.asyncio
-async def test_actuator_zenoh_publish(simulation: Simulation, zenoh_router: str, tmp_path: Path) -> None:
+async def test_actuator_zenoh_publish(
+    simulation: Simulation,
+    zenoh_router: str,
+    zenoh_session: zenoh.Session,
+    tmp_path: Path,
+) -> None:
     """
     Test that the actuator device correctly publishes to Zenoh.
     """
@@ -83,10 +87,12 @@ async def test_actuator_zenoh_publish(simulation: Simulation, zenoh_router: str,
         "virtmcu-clock,node=0,mode=slaved-icount",
     ]
 
+    # Declare subscribers BEFORE entering the simulation context so the
+    # framework's ensure_session_routing barrier covers them.
+    _sub = zenoh_session.declare_subscriber("firmware/control/**", on_sample)
+
     simulation.add_node(node_id=0, dtb=dtb, kernel=kernel, extra_args=extra_args)
     async with simulation as sim:
-        sim.vta.session.declare_subscriber("firmware/control/**", on_sample)
-
         success_1 = False
         success_2 = False
 

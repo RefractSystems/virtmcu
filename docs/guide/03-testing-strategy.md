@@ -121,10 +121,6 @@ For tests that only require QOM introspection (e.g., verifying register reset va
 - **Rule**: Allowed ONLY if no firmware is executed and no Zenoh traffic is generated.
 - Nodes remain frozen for the duration of the test; `cont` is never issued.
 
-### Migration
-Tests still using `SimulationOrchestrator` or bare `qemu_launcher` for firmware execution must migrate to the `simulation` fixture.
-Tracking Issue: <TODO: link tracking issue>
-
 ### Banned Patterns in Tests
 To maintain simulation integrity and prevent flaky CI runs, the following patterns are strictly banned and will be enforced by CI lints:
 - **Manual `ensure_session_routing(...)`**: The framework handles routing barriers internally.

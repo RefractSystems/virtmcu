@@ -3,6 +3,7 @@
 
 extern crate alloc;
 
+use alloc::ffi::CString;
 use alloc::sync::Arc;
 use core::ffi::CStr;
 use core::ffi::{c_char, c_uint, c_void};
@@ -486,10 +487,10 @@ pub fn flexray_init_internal(
 ) -> Result<*mut FlexRayState, String> {
     let (tx, rx) = bounded::<OrderedFlexRayPacket>(100);
 
-    let router_ptr = match &router {
-        Some(r) => r.as_ptr() as *const c_char,
-        None => ptr::null(),
-    };
+    let router_cstring = router
+        .as_deref()
+        .map(|r| CString::new(r).expect("router endpoint must not contain interior NUL"));
+    let router_ptr = router_cstring.as_ref().map_or(ptr::null(), |c| c.as_ptr());
 
     let session =
         unsafe { transport_zenoh::get_or_init_session(router_ptr).map_err(|e| e.to_string())? };

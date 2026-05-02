@@ -145,6 +145,7 @@ class Simulation:
         ]
         self._bridges = await asyncio.gather(*spawn_tasks)
 
+        # Only nodes with orchestrated=True (default) participate in the VTA sync loop.
         node_ids = [s.node_id for s in self._specs if s.orchestrated]
         if self.transport is not None:
             self._vta = self.transport.get_vta(node_ids)  # type: ignore[assignment]
@@ -152,7 +153,10 @@ class Simulation:
             self._vta = VirtualTimeAuthority(self._session, node_ids)
         assert self._vta is not None
 
-        if self._init_barrier:
+        # When init_barrier=True, we perform the deterministic initialization barrier.
+        # If False (e.g. for boot grace-period tests), the test is responsible for
+        # calling vta.init() and ensure_session_routing() manually after enter.
+        if self._init_barrier and node_ids:
             await self._vta.init()
             await ensure_session_routing(self._session)
 
@@ -174,8 +178,7 @@ class Simulation:
     ) -> None:
         """
         Advance virtual time in steps of `step_ns` until `condition()` is True
-        or `timeout` wall-clock seconds elapse. Mirrors the existing
-        `SimulationOrchestrator.run_until` API for migration parity.
+        or `timeout` wall-clock seconds elapse.
         """
         if self._vta is None:
             raise RuntimeError("run_until() called before Simulation context entered")
@@ -230,6 +233,9 @@ class Simulation:
                 elif "virtmcu" in val:
                     if "router=" not in val:
                         val = f"{val},router={router}"
+                    # INTENTIONAL: Injecting node= for all virtmcu devices ensures that
+                    # plugins deriving topics from node IDs (e.g. virtmcu chardev) use
+                    # the canonical simulation node ID.
                     if "node=" not in val:
                         val = f"{val},node={node_id}"
                 processed.extend([arg, val])
@@ -253,6 +259,7 @@ class Simulation:
                 else:
                     if "router=" not in arg:
                         arg = f"{arg},router={router}"
+                    # INTENTIONAL: See comment above for virtmcu chardev/device.
                     if "node=" not in arg:
                         arg = f"{arg},node={node_id}"
                     prefix = "-chardev" if "id=" in arg else "-device"
@@ -261,7 +268,7 @@ class Simulation:
                 processed.append(arg)
             i += 1
 
-        if not has_clock and spec.orchestrated:
+        if not has_clock:
             processed.extend(
                 [
                     "-device",

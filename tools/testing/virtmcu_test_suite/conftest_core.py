@@ -277,6 +277,9 @@ class VirtualTimeAuthority:
         """
         Deterministic Initialization Barrier.
         """
+        if not self.node_ids:
+            return
+
         if not self._liveliness_checked:
             liveliness_tasks = []
             for nid in self.node_ids:
@@ -460,9 +463,9 @@ async def zenoh_session(zenoh_router: str) -> AsyncGenerator[zenoh.Session]:
     # Wait for session to connect to the router by waiting for the router's liveliness token
     try:
         await wait_for_zenoh_discovery(session, "sim/router/check")
-    except TimeoutError:
+    except TimeoutError as e:
         await asyncio.to_thread(session.close)
-        raise RuntimeError(f"Failed to connect Zenoh session to {zenoh_router}") from None
+        raise RuntimeError(f"Failed to connect Zenoh session to {zenoh_router}") from e
 
     yield session
     await asyncio.to_thread(session.close)
@@ -809,7 +812,7 @@ async def qemu_launcher(
                     if asan_match:
                         raise RuntimeError(
                             f"QEMU ASan Crash Detected (rc={proc.returncode}):\n{asan_match.group(1)}"
-                        ) from None
+                        ) from e
 
                 if (
                     "failed to open module" in stderr_text
@@ -924,6 +927,9 @@ class TimeAuthority(VirtualTimeAuthority):
         """
         Deterministic Initialization Barrier.
         """
+        if not self.node_ids:
+            return
+
         if not self._liveliness_checked:
             liveliness_tasks = []
             for nid in self.node_ids:

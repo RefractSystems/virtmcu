@@ -20,11 +20,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
+import zenoh
 
 if TYPE_CHECKING:
     from typing import Any
-
-    import zenoh
 
     from tools.testing.virtmcu_test_suite.simulation import Simulation
 
@@ -204,7 +203,12 @@ SECTIONS {
 
 
 @pytest.mark.asyncio
-async def test_flexray_zenoh_tx(simulation: Simulation, zenoh_router: str, tmp_path: Path) -> None:
+async def test_flexray_zenoh_tx(
+    simulation: Simulation,
+    zenoh_router: str,
+    zenoh_session: zenoh.Session,
+    tmp_path: Path,
+) -> None:
     """
     Verify FlexRay data transmission over Zenoh.
     """
@@ -235,10 +239,12 @@ async def test_flexray_zenoh_tx(simulation: Simulation, zenoh_router: str, tmp_p
     def on_msg(sample: zenoh.Sample) -> None:
         loop.call_soon_threadsafe(queue.put_nowait, sample)
 
+    # Declare subscriber BEFORE entering the simulation context — the framework's
+    # ensure_session_routing barrier only covers subs declared before __aenter__.
+    _sub = await asyncio.to_thread(lambda: zenoh_session.declare_subscriber(tx_topic, on_msg))
+
     simulation.add_node(node_id=0, dtb=dtb_path, kernel=kernel_path, extra_args=extra_args)
     async with simulation as sim:
-        await asyncio.to_thread(lambda: sim.vta.session.declare_subscriber(tx_topic, on_msg))
-
         # Run for 20ms virtual time
         for _ in range(100):
             await sim.vta.step(1_000_000)
@@ -251,7 +257,12 @@ async def test_flexray_zenoh_tx(simulation: Simulation, zenoh_router: str, tmp_p
 
 
 @pytest.mark.asyncio
-async def test_flexray_zenoh_rx(simulation: Simulation, zenoh_router: str, tmp_path: Path) -> None:
+async def test_flexray_zenoh_rx(
+    simulation: Simulation,
+    zenoh_router: str,
+    zenoh_session: zenoh.Session,
+    tmp_path: Path,
+) -> None:
     """
     Verify FlexRay data reception from Zenoh.
     """
@@ -279,10 +290,11 @@ async def test_flexray_zenoh_rx(simulation: Simulation, zenoh_router: str, tmp_p
     import flatbuffers
     from virtmcu.flexray import FlexRayFrame
 
+    # Declare publisher BEFORE entering the simulation context.
+    pub = await asyncio.to_thread(lambda: zenoh_session.declare_publisher(rx_topic))
+
     simulation.add_node(node_id=0, dtb=dtb_path, kernel=kernel_path, extra_args=extra_args)
     async with simulation as sim:
-        pub = await asyncio.to_thread(lambda: sim.vta.session.declare_publisher(rx_topic))
-
         builder = flatbuffers.Builder(1024)
         data_off = builder.CreateByteVector(b"\xef\xbe\xad\xde")
         FlexRayFrame.Start(builder)
@@ -305,7 +317,12 @@ async def test_flexray_zenoh_rx(simulation: Simulation, zenoh_router: str, tmp_p
         assert b"\xef\xbe\xad\xde" in uart_data
 
 @pytest.mark.asyncio
-async def test_flexray_stress(simulation: Simulation, zenoh_router: str, tmp_path: Path) -> None:
+async def test_flexray_stress(
+    simulation: Simulation,
+    zenoh_router: str,
+    zenoh_session: zenoh.Session,
+    tmp_path: Path,
+) -> None:
     """
     Verify FlexRay controller under heavy load.
     """
@@ -333,10 +350,11 @@ async def test_flexray_stress(simulation: Simulation, zenoh_router: str, tmp_pat
     import flatbuffers
     from virtmcu.flexray import FlexRayFrame
 
+    # Declare publisher BEFORE entering the simulation context.
+    pub = await asyncio.to_thread(lambda: zenoh_session.declare_publisher(rx_topic))
+
     simulation.add_node(node_id=0, dtb=dtb_path, kernel=kernel_path, extra_args=extra_args)
     async with simulation as sim:
-        pub = await asyncio.to_thread(lambda: sim.vta.session.declare_publisher(rx_topic))
-
         for i in range(100):
             builder = flatbuffers.Builder(64)
             data_off = builder.CreateByteVector(b"STRESS")

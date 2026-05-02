@@ -247,9 +247,9 @@ async def test_coordinator_fast_node_race(zenoh_router: str, zenoh_session: zeno
     # call ensure_session_routing explicitly to guarantee the subscriber above
     # has propagated to the router before the coordinator starts publishing
     # `start` events. See test_coordinator_sync.py for the standard pattern.
-    # ENSURE_ROUTING_EXCEPTION: bypasses Simulation framework
     from tools.testing.virtmcu_test_suite.conftest_core import ensure_session_routing
 
+    # ENSURE_ROUTING_EXCEPTION: bypasses Simulation framework
     await ensure_session_routing(s)
 
     async def _probe_ready() -> None:

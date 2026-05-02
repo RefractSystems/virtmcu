@@ -43,7 +43,9 @@ def _on_tx(
 
 
 @pytest.mark.asyncio
-async def test_chardev_flow_control_stress(simulation: Simulation) -> None:
+async def test_chardev_flow_control_stress(
+    simulation: Simulation, zenoh_session: zenoh.Session
+) -> None:
 
     loop = asyncio.get_running_loop()
 
@@ -72,20 +74,20 @@ async def test_chardev_flow_control_stress(simulation: Simulation) -> None:
 
     simulation.add_node(node_id=node_id, dtb=dtb, kernel=kernel, extra_args=extra_args)
 
+    # Declare Zenoh subscribers BEFORE entering the simulation context
+    # so they are properly registered by ensure_session_routing
+    session = zenoh_session
+    received_data = bytearray()
+    received_event = asyncio.Event()
+    expected_count = 50
+
+    _sub = session.declare_subscriber(
+        tx_topic,
+        lambda sample: _on_tx(sample, received_data, received_event, expected_count, loop),
+    )
+    pub = session.declare_publisher(rx_topic)
+
     async with simulation as sim:
-        # Connect Zenoh to send/receive data
-        session = sim._session
-
-        received_data = bytearray()
-        received_event = asyncio.Event()
-        expected_count = 50
-
-        _sub = session.declare_subscriber(
-            tx_topic,
-            lambda sample: _on_tx(sample, received_data, received_event, expected_count, loop),
-        )
-        pub = session.declare_publisher(rx_topic)
-
         # Wait for firmware boot by stepping simulation
         booted = False
 

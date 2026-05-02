@@ -35,7 +35,8 @@ def lint_file(path: Path) -> list[str]:
                 # Exception: framework code or explicitly whitelisted with a comment
                 is_exception = path.name in ("conftest_core.py", "simulation.py")
                 if not is_exception:
-                    for i in range(max(0, node.lineno - 4), min(len(lines), node.lineno + 3)):
+                    # Symmetric check: 3 lines back, current line, 1 line forward
+                    for i in range(max(0, node.lineno - 3), min(len(lines), node.lineno + 1)):
                         if "ENSURE_ROUTING_EXCEPTION" in lines[i]:
                             is_exception = True
                             break
@@ -46,15 +47,24 @@ def lint_file(path: Path) -> list[str]:
                     )
 
             if name == "qemu_launcher":
-                # Exception: conftest_core.py or inspection_bridge implementation
-                is_exception = (
-                    path.name == "conftest_core.py"
-                    or (path.name == "conftest.py" and "inspection_bridge" in content)
-                )
+                # Exception: conftest_core.py contains the only approved callers
+                # (qmp_bridge, simulation fixture, and inspection_bridge).
+                is_exception = path.name == "conftest_core.py"
                 if not is_exception:
                     violations.append(
                         f"{path}:{node.lineno}: Banned call to qemu_launcher(). "
                         "Use simulation or inspection_bridge instead."
+                    )
+
+            if name in ("Simulation", "VirtmcuSimulation", "SimulationOrchestrator"):
+                # Exception: conftest_core.py (fixture) or simulation.py (implementation).
+                # `SimulationOrchestrator` was deleted but is kept here as a
+                # tripwire — if a future change re-introduces it, the lint fires.
+                is_exception = path.name in ("conftest_core.py", "simulation.py")
+                if not is_exception:
+                    violations.append(
+                        f"{path}:{node.lineno}: Banned direct {name}() instantiation. "
+                        "Use the simulation fixture instead."
                     )
 
         # Rule 4: Manual -S in extra_args
