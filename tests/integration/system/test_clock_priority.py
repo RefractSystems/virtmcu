@@ -95,84 +95,96 @@ topology:
 """
     )
 
-    # Launch Coordinator
-    coord_proc = await asyncio.create_subprocess_exec(
-        str(coordinator_bin),
+    from tools.testing.virtmcu_test_suite.conftest_core import (
+        coordinator_subprocess,
+        open_client_session,
+    )
+    from tools.testing.virtmcu_test_suite.transport import ZenohTransportImpl
+
+    # Launch Coordinator via SOTA helper
+    coord_args = [
         "--nodes",
         "1",
         "--connect",
         zenoh_router,
         "--topology",
         str(board_yaml),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-
-    from tools.testing.virtmcu_test_suite.conftest_core import open_client_session
-    from tools.testing.virtmcu_test_suite.transport import ZenohTransportImpl
-
-    ta_session = await asyncio.to_thread(lambda: open_client_session(connect=zenoh_router))
-    simulation.transport = ZenohTransportImpl(zenoh_router, ta_session)
-
-    # Launch QEMU with clock (private session) and chardev (shared session)
-    # simulation handles router, node, mode=slaved-icount
-    extra_args = [
-        "-chardev",
-        "virtmcu,id=char0,topic=sim/priority_test/uart",
-        "-serial",
-        "chardev:char0",
     ]
 
-    simulation.add_node(node_id=0, dtb=board_yaml, kernel=firmware_path, extra_args=extra_args)
+    async with coordinator_subprocess(
+        binary=coordinator_bin, args=coord_args, zenoh_session=zenoh_session, liveliness_topic="sim/coord/alive"
+    ):
 
-    try:
-        async with simulation as sim:
-            vta = sim.vta
-            assert vta is not None
-            # Baseline: Measure RTT with NO load
-            rtts_baseline = []
-            logger.info("\nMeasuring baseline RTT (10ms quanta)...")
-            for i in range(10):
-                t0 = time.perf_counter()
-                await vta.step(delta_ns=10_000_000)
-                rtts_baseline.append(time.perf_counter() - t0)
-                if i % 2 == 0:
-                    logger.info(f"  Baseline {i}: {rtts_baseline[-1] * 1000:.2f} ms")
+        ta_session = await asyncio.to_thread(
+            lambda: open_client_session(connect=zenoh_router)
+        )
+        simulation.transport = ZenohTransportImpl(zenoh_router, ta_session)
 
-            avg_baseline = sum(rtts_baseline) / len(rtts_baseline)
-            logger.info(f"Baseline Clock RTT: {avg_baseline * 1000:.2f} ms")
+        # Launch QEMU with clock (private session) and chardev (shared session)
+        # simulation handles router, node, mode=slaved-icount
+        extra_args = [
+            "-chardev",
+            "virtmcu,id=char0,topic=sim/priority_test/uart",
+            "-serial",
+            "chardev:char0",
+        ]
 
-            # Stress: Flood the SHARED session
-            flood_topic = "virtmcu/stress/noise"
-            pub = await asyncio.to_thread(lambda: zenoh_session.declare_publisher(flood_topic))
-            noise_data = b"X" * 4096
-            noise_count = 1000
+        simulation.add_node(
+            node_id=0, dtb=board_yaml, kernel=firmware_path, extra_args=extra_args
+        )
 
-            logger.info(f"Starting flood of {noise_count} packets on shared session...")
+        try:
+            async with simulation as sim:
+                vta = sim.vta
+                assert vta is not None
+                # Baseline: Measure RTT with NO load
+                rtts_baseline = []
+                logger.info("\nMeasuring baseline RTT (10ms quanta)...")
+                for i in range(10):
+                    t0 = time.perf_counter()
+                    await vta.step(delta_ns=10_000_000)
+                    rtts_baseline.append(time.perf_counter() - t0)
+                    if i % 2 == 0:
+                        logger.info(f"  Baseline {i}: {rtts_baseline[-1] * 1000:.2f} ms")
 
-            flood_task = asyncio.create_task(_flood(noise_count, pub, noise_data))
+                avg_baseline = sum(rtts_baseline) / len(rtts_baseline)
+                logger.info(f"Baseline Clock RTT: {avg_baseline * 1000:.2f} ms")
 
-            # Measure RTT WITH load
-            rtts_stress = []
-            logger.info("Measuring stress RTT (10ms quanta)...")
-            for i in range(10):
-                t0 = time.perf_counter()
-                await vta.step(delta_ns=10_000_000)
-                rtts_stress.append(time.perf_counter() - t0)
-                if i % 2 == 0:
-                    logger.info(f"  Stress {i}: {rtts_stress[-1] * 1000:.2f} ms")
-                await yield_now()
+                # Stress: Flood the SHARED session
+                flood_topic = "virtmcu/stress/noise"
+                pub = await asyncio.to_thread(
+                    lambda: zenoh_session.declare_publisher(flood_topic)
+                )
+                noise_data = b"X" * 4096
+                noise_count = 1000
 
-            await flood_task
-            avg_stress = sum(rtts_stress) / len(rtts_stress)
-            logger.info(f"Stress Clock RTT: {avg_stress * 1000:.2f} ms")
+                logger.info(f"Starting flood of {noise_count} packets on shared session...")
 
-            # Isolation ensures separate executors, so data plane flood shouldn't block clock.
-            assert avg_stress < 0.100, f"Clock synchronization starved! RTT={avg_stress * 1000:.2f}ms"
+                flood_task = asyncio.create_task(_flood(noise_count, pub, noise_data))
 
-            logger.info(f"Clock Jitter Increase: {(avg_stress - avg_baseline) * 1000:.2f} ms")
+                # Measure RTT WITH load
+                rtts_stress = []
+                logger.info("Measuring stress RTT (10ms quanta)...")
+                for i in range(10):
+                    t0 = time.perf_counter()
+                    await vta.step(delta_ns=10_000_000)
+                    rtts_stress.append(time.perf_counter() - t0)
+                    if i % 2 == 0:
+                        logger.info(f"  Stress {i}: {rtts_stress[-1] * 1000:.2f} ms")
+                    await yield_now()
 
-    finally:
-        await asyncio.to_thread(ta_session.close)
-        coord_proc.terminate()
-        await coord_proc.wait()
+                await flood_task
+                avg_stress = sum(rtts_stress) / len(rtts_stress)
+                logger.info(f"Stress Clock RTT: {avg_stress * 1000:.2f} ms")
+
+                # Isolation ensures separate executors, so data plane flood shouldn't block clock.
+                assert (
+                    avg_stress < 0.100
+                ), f"Clock synchronization starved! RTT={avg_stress * 1000:.2f}ms"
+
+                logger.info(
+                    f"Clock Jitter Increase: {(avg_stress - avg_baseline) * 1000:.2f} ms"
+                )
+
+        finally:
+            await asyncio.to_thread(ta_session.close)

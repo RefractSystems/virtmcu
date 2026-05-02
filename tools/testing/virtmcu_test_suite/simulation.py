@@ -44,6 +44,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Known virtmcu plugins and their substrings for detection
+# Note: 'clock' is handled natively by vta.init() and thus excluded from some loops.
+_KNOWN_VIRTMCU_PLUGINS = [
+    "chardev", "netdev", "spi", "canfd", "ieee802154", "flexray",
+    "actuator", "ui", "telemetry", "s32k144-lpuart"
+]
+
 
 @dataclass
 class _NodeSpec:
@@ -58,23 +65,68 @@ class _NodeSpec:
         plugins = set()
         import re
 
-        for arg in self.extra_args:
-            m = re.search(r"virtmcu-([a-zA-Z0-9_]+)", arg)
+        import fdt
+
+        # Mapping from QOM type names / compatible strings to liveliness plugin names
+        type_to_plugin = {
+            "can-host-virtmcu": "canfd",
+            "virtmcu": "chardev",
+            "virtmcu-chardev": "chardev",
+            "netdev": "netdev",
+            "spi": "spi",
+            "ieee802154": "ieee802154",
+            "flexray": "flexray",
+            "actuator": "actuator",
+            "ui": "ui",
+            "telemetry": "telemetry",
+            "s32k144-lpuart": "s32k144-lpuart",
+        }
+
+        for i, arg in enumerate(self.extra_args):
+            # Detect via virtmcu- prefix (ensure it's a word boundary to avoid matching paths)
+            m = re.search(r"\bvirtmcu-([a-zA-Z0-9_]+)", arg)
             if m:
                 plugins.add(m.group(1))
-            if "s32k144-lpuart" in arg:
-                plugins.add("s32k144-lpuart")
+            
+            # Detect via explicit names in -device, -chardev, or -netdev
+            if arg in ["-device", "-chardev", "-netdev"] and i + 1 < len(self.extra_args):
+                val = self.extra_args[i + 1]
+                type_name = val.split(",")[0]
+                if type_name in type_to_plugin:
+                    plugins.add(type_to_plugin[type_name])
+            
+            # Detect via -global
+            elif arg == "-global" and i + 1 < len(self.extra_args):
+                val = self.extra_args[i + 1]
+                for t, p in type_to_plugin.items():
+                    if val.startswith(f"{t}."):
+                        plugins.add(p)
 
         if self.dtb and Path(self.dtb).exists():
-            with open(self.dtb, "rb") as f:
-                content = f.read()
-                if b"s32k144-lpuart" in content:
-                    plugins.add("s32k144-lpuart")
-                for plugin in ["chardev", "netdev", "spi", "canfd", "ieee802154", "flexray", "actuator", "ui", "telemetry"]:
-                    if f"virtmcu-{plugin}".encode() in content:
-                        plugins.add(plugin)
+            import fdt
+            try:
+                with open(self.dtb, "rb") as f:
+                    dtb = fdt.parse_dtb(f.read())
+                    for _path, _nodes, props in dtb.walk():
+                        for p in props:
+                            if p.name == "compatible":
+                                # 'compatible' can be a single string or a list of strings
+                                # the fdt library usually returns a list for strings
+                                comps = p.data if isinstance(p.data, list) else [p.data]
+                                for c in comps:
+                                    if not isinstance(c, str):
+                                        continue
+                                    if c in type_to_plugin:
+                                        plugins.add(type_to_plugin[c])
+                                    elif c.startswith("virtmcu-"):
+                                        plugins.add(c[len("virtmcu-"):])
+            except Exception as e:  # noqa: BLE001
+                # self.dtb might be a .yaml file or corrupted dtb; fail gracefully.
+                # Catching Exception is intentional here as fdt.parse_dtb can throw 
+                # various undocumented errors on malformed DTBs or YAML input.
+                logger.debug(f"Skipping fdt parse of {self.dtb}: {e}")
 
-        plugins.discard("clock") # clock is handled natively by vta.init()
+        plugins.discard("clock")
         return plugins
 
 
@@ -184,16 +236,21 @@ class Simulation:
         # When init_barrier=True, we perform the deterministic initialization barrier.
         # If False (e.g. for boot grace-period tests), the test is responsible for
         # calling vta.init() and ensure_session_routing() manually after enter.
+        # NOTE: We only wait for plugin liveliness if we are using the Zenoh transport,
+        # as plugins skip declaring liveliness tokens on other transports (e.g. Unix sockets).
         if self._init_barrier and node_ids:
             await self._vta.init()
             await ensure_session_routing(self._session)
 
-            for spec in self._specs:
-                for plugin in spec.plugins:
-                    try:
-                        await wait_for_zenoh_discovery(self._session, f"sim/{plugin}/liveliness/{spec.node_id}")
-                    except TimeoutError:
-                        logger.warning(f"Timeout waiting for liveliness token of plugin '{plugin}' on node {spec.node_id}")
+            is_zenoh = self.transport is None or "Zenoh" in self.transport.__class__.__name__
+
+            if is_zenoh:
+                for spec in self._specs:
+                    for plugin in spec.plugins:
+                        try:
+                            await wait_for_zenoh_discovery(self._session, f"sim/{plugin}/liveliness/{spec.node_id}")
+                        except TimeoutError:
+                            logger.warning(f"Timeout waiting for liveliness token of plugin '{plugin}' on node {spec.node_id}")
 
         for bridge in self._bridges:
             await bridge.start_emulation()
@@ -250,9 +307,40 @@ class Simulation:
         processed: list[str] = []
         has_clock = False
 
+        # Mapping from QOM type names / compatible strings to liveliness plugin names
+        # Duplicate here for injection logic
+        type_to_plugin = {
+            "can-host-virtmcu": "canfd",
+            "virtmcu": "chardev",
+            "virtmcu-chardev": "chardev",
+            "netdev": "netdev",
+            "spi": "spi",
+            "ieee802154": "ieee802154",
+            "flexray": "flexray",
+            "actuator": "actuator",
+            "ui": "ui",
+            "telemetry": "telemetry",
+            "s32k144-lpuart": "s32k144-lpuart",
+        }
+
+        def is_virtmcu_plugin_type(val: str) -> bool:
+            type_name = val.split(",")[0]
+            return type_name in type_to_plugin or type_name.startswith("virtmcu-")
+
         i = 0
         while i < len(args_in):
             arg = str(args_in[i])
+            
+            # Skip arguments of flags that we know shouldn't be touched
+            if arg in ["-serial", "-monitor", "-display", "-cpu", "-m", "-kernel", "-dtb", "-append"]:
+                processed.append(arg)
+                if i + 1 < len(args_in):
+                    processed.append(str(args_in[i + 1]))
+                    i += 2
+                else:
+                    i += 1
+                continue
+
             if arg in ["-device", "-chardev", "-netdev"] and i + 1 < len(args_in):
                 val = str(args_in[i + 1])
                 if "virtmcu-clock" in val:
@@ -265,12 +353,9 @@ class Simulation:
                         val = f"{val},mode=slaved-icount"
                     if "stall-timeout=" not in val:
                         val = f"{val},stall-timeout={scaled_stall}"
-                elif "virtmcu" in val:
+                elif is_virtmcu_plugin_type(val):
                     if "router=" not in val:
                         val = f"{val},router={router}"
-                    # INTENTIONAL: Injecting node= for all virtmcu devices ensures that
-                    # plugins deriving topics from node IDs (e.g. virtmcu chardev) use
-                    # the canonical simulation node ID.
                     if "node=" not in val:
                         val = f"{val},node={node_id}"
                 processed.extend([arg, val])
@@ -288,17 +373,20 @@ class Simulation:
                 if "stall-timeout=" not in arg:
                     arg = f"{arg},stall-timeout={scaled_stall}"
                 processed.extend(["-device", arg])
-            elif "virtmcu" in arg and arg not in ["-device", "-chardev", "-global"]:
-                if i > 0 and args_in[i - 1] == "-global":
-                    processed.append(arg)
-                else:
-                    if "router=" not in arg:
-                        arg = f"{arg},router={router}"
-                    # INTENTIONAL: See comment above for virtmcu chardev/device.
-                    if "node=" not in arg:
-                        arg = f"{arg},node={node_id}"
-                    prefix = "-chardev" if "id=" in arg else "-device"
-                    processed.extend([prefix, arg])
+            elif arg == "-global" and i + 1 < len(args_in):
+                val = str(args_in[i + 1])
+                # We could inject into globals here if needed, but usually they are 
+                # manually specified in tests that use them.
+                processed.extend([arg, val])
+                i += 2
+                continue
+            elif is_virtmcu_plugin_type(arg) and arg not in ["-device", "-chardev", "-global"]:
+                if "router=" not in arg:
+                    arg = f"{arg},router={router}"
+                if "node=" not in arg:
+                    arg = f"{arg},node={node_id}"
+                prefix = "-chardev" if "id=" in arg else "-device"
+                processed.extend([prefix, arg])
             else:
                 processed.append(arg)
             i += 1

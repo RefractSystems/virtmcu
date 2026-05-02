@@ -38,10 +38,21 @@ async def test_riscv_boot(simulation: Simulation) -> None:
         node_id=0,
         dtb=dtb,
         kernel=kernel,
-        extra_args=["-m", "512M", "--arch", "riscv64"],
-        orchestrated=False,
+        extra_args=["-m", "512M", "--arch", "riscv64", "-bios", "none"],
     )
     async with simulation as sim:
-        # In non-orchestrated mode, we don't use vta.step()
         assert sim.bridge is not None
+        assert sim.vta is not None
+        
+        # In orchestrated mode, we need to drive the clock
+        import asyncio
+        async def step_clock() -> None:
+            for _ in range(100):
+                await sim.vta.step(delta_ns=10000000) # 10ms steps
+
+        # Run clock in background while we wait for UART
+        clock_task = asyncio.create_task(step_clock())
+        
         assert await sim.bridge.wait_for_line_on_uart("HI RV", timeout=10.0)
+        
+        clock_task.cancel()

@@ -596,11 +596,11 @@ async def zenoh_coordinator(
 
     from tools.testing.virtmcu_test_suite.artifact_resolver import get_rust_binary_path
 
-    coord_bin = get_rust_binary_path("zenoh_coordinator")
+    coord_bin = get_rust_binary_path("deterministic_coordinator")
 
     # Use a lock to build once in parallel runs
     if not coord_bin.exists():
-        lock_file = workspace_root / "tools/zenoh_coordinator/build.lock"
+        lock_file = workspace_root / "tools/deterministic_coordinator/build.lock"
         import fcntl
 
         def _blocking_build() -> None:
@@ -608,18 +608,18 @@ async def zenoh_coordinator(
                 # This blocks until the lock is acquired
                 fcntl.flock(f, fcntl.LOCK_EX)
                 if not coord_bin.exists():
-                    logger.info("Building zenoh_coordinator...")
+                    logger.info("Building deterministic_coordinator...")
                     cargo_cmd = shutil.which("cargo") or "cargo"
                     subprocess.run(
                         [cargo_cmd, "build", "--release"],
-                        cwd=(workspace_root / "tools/zenoh_coordinator"),
+                        cwd=(workspace_root / "tools/deterministic_coordinator"),
                         check=True,
                     )
 
         await asyncio.to_thread(_blocking_build)
 
         # Refresh location after build
-        coord_bin = get_rust_binary_path("zenoh_coordinator")
+        coord_bin = get_rust_binary_path("deterministic_coordinator")
 
     pdes = getattr(request, "param", {}).get("pdes", False)
     topology = getattr(request, "param", {}).get("topology", None)
@@ -645,7 +645,7 @@ async def zenoh_coordinator(
         lambda: zenoh.open(check_config)  # ZENOH_OPEN_EXCEPTION: config built by make_client_config
     )
     try:
-        await wait_for_zenoh_discovery(check_session, "sim/coordinator/liveliness")
+        await wait_for_zenoh_discovery(check_session, "sim/coord/alive")
     finally:
         await asyncio.to_thread(check_session.close)
 
