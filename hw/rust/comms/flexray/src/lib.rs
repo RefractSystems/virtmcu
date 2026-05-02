@@ -1,5 +1,6 @@
 //! Virtmcu FlexRay controller with pluggable transport.
 //! Restoration of known-working version from commit 1435f0c39b5.
+use zenoh::Wait;
 
 extern crate alloc;
 
@@ -96,6 +97,7 @@ pub struct FlexRayState {
     pending_packet: BqlGuarded<Option<OrderedFlexRayPacket>>,
     current_cycle: Arc<AtomicUsize>,
     is_valid: Arc<AtomicBool>,
+    pub _liveliness: Option<zenoh::liveliness::LivelinessToken>,
 }
 
 impl PartialEq for OrderedFlexRayPacket {
@@ -495,9 +497,12 @@ pub fn flexray_init_internal(
     let session =
         unsafe { transport_zenoh::get_or_init_session(router_ptr).map_err(|e| e.to_string())? };
     let transport: Arc<dyn virtmcu_api::DataTransport> =
-        Arc::new(transport_zenoh::ZenohDataTransport::new(session));
+        Arc::new(transport_zenoh::ZenohDataTransport::new(Arc::clone(&session)));
 
+    let liveliness =
+        session.liveliness().declare_token(format!("sim/flexray/liveliness/{node_id}")).wait().ok();
     let mut state = Box::new(FlexRayState {
+        _liveliness: liveliness,
         _node_id: node_id,
         _debug: debug,
         topic: topic.clone(),

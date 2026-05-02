@@ -75,7 +75,7 @@ async def test_chardev_flow_control_stress(
     simulation.add_node(node_id=node_id, dtb=dtb, kernel=kernel, extra_args=extra_args)
 
     # Declare Zenoh subscribers BEFORE entering the simulation context
-    # so they are properly registered by ensure_session_routing
+    # so the framework's routing barrier covers them.
     session = zenoh_session
     received_data = bytearray()
     received_event = asyncio.Event()

@@ -17,7 +17,6 @@ def lint_file(path: Path) -> list[str]:
     try:
         with path.open("r", encoding="utf-8") as f:
             content = f.read()
-            lines = content.splitlines()
             tree = ast.parse(content, filename=str(path))
     except (OSError, SyntaxError, ValueError) as e:
         return [f"{path}:0: Error parsing file: {e}"]
@@ -32,18 +31,16 @@ def lint_file(path: Path) -> list[str]:
                 name = node.func.attr
 
             if name == "ensure_session_routing":
-                # Exception: framework code or explicitly whitelisted with a comment
-                is_exception = path.name in ("conftest_core.py", "simulation.py")
-                if not is_exception:
-                    # Symmetric check: 3 lines back, current line, 1 line forward
-                    for i in range(max(0, node.lineno - 3), min(len(lines), node.lineno + 1)):
-                        if "ENSURE_ROUTING_EXCEPTION" in lines[i]:
-                            is_exception = True
-                            break
-                if not is_exception:
+                # Hard-ban in tests. The framework handles routing for firmware
+                # tests (`simulation` fixture) and for direct-coordinator tests
+                # (`coordinator_subprocess` context manager). There is no
+                # remaining legitimate caller in tests.
+                if path.name not in ("conftest_core.py", "simulation.py"):
                     violations.append(
                         f"{path}:{node.lineno}: Banned call to ensure_session_routing(). "
-                        "The Simulation framework handles this automatically."
+                        "Use the `simulation` fixture (firmware tests) or "
+                        "`coordinator_subprocess` context manager (direct-coordinator "
+                        "tests). Both run the routing barrier internally."
                     )
 
             if name == "qemu_launcher":

@@ -11,15 +11,13 @@ Ensure correct functionality, performance, and deterministic execution of test_p
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
 from tools.testing.virtmcu_test_suite.artifact_resolver import resolve_rust_binary
-from tools.testing.virtmcu_test_suite.conftest_core import wait_for_zenoh_discovery
+from tools.testing.virtmcu_test_suite.conftest_core import coordinator_subprocess
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -47,97 +45,77 @@ topology:
     """)
 
     async def run_simulation(pcap_path: Path) -> None:
-        proc = await asyncio.create_subprocess_exec(
-            "stdbuf",
-            "-oL",
-            str(coordinator_bin),
-            "--connect",
-            zenoh_router,
-            "--topology",
-            str(world_yaml),
-            "--pcap-log",
-            str(pcap_path),
-            "--nodes",
-            "2",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        msg_payload_eth = b"ETH"
+        msg_eth = (
+            (1).to_bytes(4, "little")
+            + (0).to_bytes(4, "little")
+            + (2).to_bytes(4, "little")
+            + (1000).to_bytes(8, "little")
+            + (1).to_bytes(8, "little")
+            + (0).to_bytes(1, "little")
+            + len(msg_payload_eth).to_bytes(4, "little")
+            + msg_payload_eth
+        )
+        msg_payload_uart1 = b"UART1"
+        msg_uart1 = (
+            (1).to_bytes(4, "little")
+            + (0).to_bytes(4, "little")
+            + (1).to_bytes(4, "little")
+            + (2000).to_bytes(8, "little")
+            + (2).to_bytes(8, "little")
+            + (1).to_bytes(1, "little")
+            + len(msg_payload_uart1).to_bytes(4, "little")
+            + msg_payload_uart1
+        )
+        msg_payload_uart2 = b"UART2"
+        msg_uart2 = (
+            (1).to_bytes(4, "little")
+            + (1).to_bytes(4, "little")
+            + (0).to_bytes(4, "little")
+            + (3000).to_bytes(8, "little")
+            + (3).to_bytes(8, "little")
+            + (1).to_bytes(1, "little")
+            + len(msg_payload_uart2).to_bytes(4, "little")
+            + msg_payload_uart2
+        )
+
+        loop = asyncio.get_running_loop()
+        quantum_event = asyncio.Event()
+
+        def on_start(sample: object) -> None:
+            q = int.from_bytes(cast(Any, sample).payload.to_bytes(), "little")
+            if q == 2:
+                loop.call_soon_threadsafe(quantum_event.set)
+
+        # Declare subscriber BEFORE entering the coordinator context — the
+        # framework's routing barrier inside coordinator_subprocess covers it.
+        sub = await asyncio.to_thread(
+            lambda: zenoh_session.declare_subscriber("sim/clock/start/0", on_start)
         )
 
         try:
-            await wait_for_zenoh_discovery(zenoh_session, "sim/coord/alive")
-
-            msg_payload_eth = b"ETH"
-            msg_eth = (
-                (1).to_bytes(4, "little")
-                + (0).to_bytes(4, "little")
-                + (2).to_bytes(4, "little")
-                + (1000).to_bytes(8, "little")
-                + (1).to_bytes(8, "little")
-                + (0).to_bytes(1, "little")
-                + len(msg_payload_eth).to_bytes(4, "little")
-                + msg_payload_eth
-            )
-            msg_payload_uart1 = b"UART1"
-            msg_uart1 = (
-                (1).to_bytes(4, "little")
-                + (0).to_bytes(4, "little")
-                + (1).to_bytes(4, "little")
-                + (2000).to_bytes(8, "little")
-                + (2).to_bytes(8, "little")
-                + (1).to_bytes(1, "little")
-                + len(msg_payload_uart1).to_bytes(4, "little")
-                + msg_payload_uart1
-            )
-            msg_payload_uart2 = b"UART2"
-            msg_uart2 = (
-                (1).to_bytes(4, "little")
-                + (1).to_bytes(4, "little")
-                + (0).to_bytes(4, "little")
-                + (3000).to_bytes(8, "little")
-                + (3).to_bytes(8, "little")
-                + (1).to_bytes(1, "little")
-                + len(msg_payload_uart2).to_bytes(4, "little")
-                + msg_payload_uart2
-            )
-
-            loop = asyncio.get_running_loop()
-            quantum_event = asyncio.Event()
-
-            def on_start(sample: object) -> None:
-                q = int.from_bytes(cast(Any, sample).payload.to_bytes(), "little")
-                if q == 2:
-                    loop.call_soon_threadsafe(quantum_event.set)
-
-            sub = await asyncio.to_thread(lambda: zenoh_session.declare_subscriber("sim/clock/start/0", on_start))
-
-            try:
-
+            async with coordinator_subprocess(
+                binary=coordinator_bin,
+                args=[
+                    "--connect", zenoh_router,
+                    "--topology", str(world_yaml),
+                    "--pcap-log", str(pcap_path),
+                    "--nodes", "2",
+                ],
+                zenoh_session=zenoh_session,
+                liveliness_topic="sim/coord/alive",
+            ):
                 def _send() -> None:
                     zenoh_session.put("sim/coord/0/tx", msg_eth)
                     zenoh_session.put("sim/coord/0/tx", msg_uart1)
                     zenoh_session.put("sim/coord/1/tx", msg_uart2)
-
                     zenoh_session.put("sim/coord/0/done", (1).to_bytes(8, "little"))
                     zenoh_session.put("sim/coord/1/done", (1).to_bytes(8, "little"))
 
                 await asyncio.to_thread(_send)
                 await asyncio.wait_for(quantum_event.wait(), timeout=5.0)
-            finally:
-                await asyncio.to_thread(sub.undeclare)
-
         finally:
-            with contextlib.suppress(Exception):
-                proc.terminate()
-                await proc.wait()
-
-            assert proc.stderr is not None
-            stderr = (await proc.stderr.read()).decode()
-            assert proc.stdout is not None
-            stdout = (await proc.stdout.read()).decode()
-            logger.info("STDOUT: %s", stdout)
-            logger.info("STDERR: %s", stderr)
-            if proc.returncode != 0 and proc.returncode != -15:
-                logger.info(f"Coordinator exited with code {proc.returncode}")
+            await asyncio.to_thread(sub.undeclare)
 
     pcap1 = tmp_path / "run1.pcap"
     await run_simulation(pcap1)

@@ -57,9 +57,7 @@ async def test_telemetry_emission(
             node_id=0, dtb=dtb, kernel=kernel, extra_args=["-device", f"telemetry,node=0,router={zenoh_router}"]
         )
         async with simulation as sim:
-            from tools.testing.virtmcu_test_suite.conftest_core import wait_for_zenoh_discovery
 
-            await wait_for_zenoh_discovery(zenoh_session, "sim/telemetry/liveliness/0")
 
             # Run until guest app emits something (it should at boot)
             await sim.vta.step(100_000_000)
@@ -106,9 +104,7 @@ async def test_telemetry_integrity(
             node_id=0, dtb=dtb, kernel=kernel, extra_args=["-device", f"telemetry,node=0,router={zenoh_router}"]
         )
         async with simulation as sim:
-            from tools.testing.virtmcu_test_suite.conftest_core import wait_for_zenoh_discovery
 
-            await wait_for_zenoh_discovery(zenoh_session, "sim/telemetry/liveliness/0")
             await sim.vta.step(100_000_000)
 
             # Wait a moment for async delivery

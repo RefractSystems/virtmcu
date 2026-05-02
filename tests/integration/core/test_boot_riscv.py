@@ -21,10 +21,10 @@ async def test_riscv_boot(simulation: Simulation) -> None:
 
     workspace_root = WORKSPACE_ROOT
     riscv_test_dir = workspace_root / "tests/fixtures/guest_apps/boot_riscv"
-    dts = riscv_test_dir / "minimal.dts"
+    dtb = riscv_test_dir / "minimal.dtb"
     kernel = riscv_test_dir / "hello.elf"
 
-    if not dts.exists() or not kernel.exists():
+    if not dtb.exists() or not kernel.exists():
         import subprocess
 
         subprocess.run(
@@ -34,7 +34,13 @@ async def test_riscv_boot(simulation: Simulation) -> None:
         )
 
     # Boot and check UART using Simulation
-    simulation.add_node(node_id=0, dtb=dts, kernel=kernel, extra_args=["-m", "512M"], orchestrated=False)
+    simulation.add_node(
+        node_id=0,
+        dtb=dtb,
+        kernel=kernel,
+        extra_args=["-m", "512M", "--arch", "riscv64"],
+        orchestrated=False,
+    )
     async with simulation as sim:
         # In non-orchestrated mode, we don't use vta.step()
         assert sim.bridge is not None

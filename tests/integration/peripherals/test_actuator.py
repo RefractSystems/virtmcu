@@ -88,7 +88,7 @@ async def test_actuator_zenoh_publish(
     ]
 
     # Declare subscribers BEFORE entering the simulation context so the
-    # framework's ensure_session_routing barrier covers them.
+    # framework's routing barrier covers them.
     _sub = zenoh_session.declare_subscriber("firmware/control/**", on_sample)
 
     simulation.add_node(node_id=0, dtb=dtb, kernel=kernel, extra_args=extra_args)

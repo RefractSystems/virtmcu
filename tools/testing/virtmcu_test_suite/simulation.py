@@ -29,6 +29,7 @@ from tools.testing.utils import get_time_multiplier
 from tools.testing.virtmcu_test_suite.conftest_core import (
     VirtualTimeAuthority,
     ensure_session_routing,
+    wait_for_zenoh_discovery,
 )
 
 if TYPE_CHECKING:
@@ -50,6 +51,30 @@ class _NodeSpec:
     kernel: str | Path | None
     extra_args: list[str] = field(default_factory=list)
     orchestrated: bool = True
+
+    @property
+    def plugins(self) -> set[str]:
+        plugins = set()
+        import re
+
+        for arg in self.extra_args:
+            m = re.search(r"virtmcu-([a-zA-Z0-9_]+)", arg)
+            if m:
+                plugins.add(m.group(1))
+            if "s32k144-lpuart" in arg:
+                plugins.add("s32k144-lpuart")
+
+        if self.dtb and Path(self.dtb).exists():
+            with open(self.dtb, "rb") as f:
+                content = f.read()
+                if b"s32k144-lpuart" in content:
+                    plugins.add("s32k144-lpuart")
+                for plugin in ["chardev", "netdev", "spi", "canfd", "ieee802154", "flexray", "actuator", "ui", "telemetry"]:
+                    if f"virtmcu-{plugin}".encode() in content:
+                        plugins.add(plugin)
+
+        plugins.discard("clock") # clock is handled natively by vta.init()
+        return plugins
 
 
 class Simulation:
@@ -73,7 +98,7 @@ class Simulation:
         self._specs: list[_NodeSpec] = []
         self._bridges: list[QmpBridge] = []
         self._vta: VirtualTimeAuthority | None = None
-        # When False, __aenter__ skips vta.init() and ensure_session_routing,
+        # When False, __aenter__ skips vta.init() and ensure_session_routing, wait_for_zenoh_discovery,
         # so the test can drive boot grace-period scenarios. The framework
         # still injects -S and `cont` is still issued at the end. Default True.
         self._init_barrier = init_barrier
@@ -94,7 +119,9 @@ class Simulation:
             raise RuntimeError(
                 "Simulation.add_node() must be called before entering the async context"
             )
-        self._specs.append(_NodeSpec(node_id, dtb, kernel, list(extra_args or []), orchestrated))
+        self._specs.append(
+            _NodeSpec(node_id, dtb, kernel, list(extra_args or []), orchestrated)
+        )
 
     @property
     def vta(self) -> VirtualTimeAuthority:
@@ -159,6 +186,13 @@ class Simulation:
         if self._init_barrier and node_ids:
             await self._vta.init()
             await ensure_session_routing(self._session)
+
+            for spec in self._specs:
+                for plugin in spec.plugins:
+                    try:
+                        await wait_for_zenoh_discovery(self._session, f"sim/{plugin}/liveliness/{spec.node_id}")
+                    except TimeoutError:
+                        logger.warning(f"Timeout waiting for liveliness token of plugin '{plugin}' on node {spec.node_id}")
 
         for bridge in self._bridges:
             await bridge.start_emulation()

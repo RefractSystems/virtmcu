@@ -1,4 +1,5 @@
 //! Virtmcu actuator device with pluggable transport.
+use zenoh::Wait;
 
 extern crate alloc;
 
@@ -53,6 +54,7 @@ struct ActuatorPacket {
 pub struct VirtmcuActuatorState {
     shared: Arc<SharedState>,
     bg_thread: Option<JoinHandle<()>>,
+    pub _liveliness: Option<zenoh::liveliness::LivelinessToken>,
 }
 
 pub struct InnerState {
@@ -363,7 +365,22 @@ fn actuator_init_internal(
 
     let bg_thread = start_tx_thread(Arc::clone(&shared), rx);
 
-    Box::into_raw(Box::new(VirtmcuActuatorState { shared, bg_thread: Some(bg_thread) }))
+    let liveliness = if transport_name == "zenoh" {
+        match unsafe { transport_zenoh::get_or_init_session(router) } {
+            Ok(session) => {
+                let hb_topic = format!("sim/actuator/liveliness/{node_id}");
+                session.liveliness().declare_token(hb_topic).wait().ok()
+            }
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+    Box::into_raw(Box::new(VirtmcuActuatorState {
+        shared,
+        bg_thread: Some(bg_thread),
+        _liveliness: liveliness,
+    }))
 }
 
 fn actuator_publish(

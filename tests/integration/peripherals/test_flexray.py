@@ -239,8 +239,8 @@ async def test_flexray_zenoh_tx(
     def on_msg(sample: zenoh.Sample) -> None:
         loop.call_soon_threadsafe(queue.put_nowait, sample)
 
-    # Declare subscriber BEFORE entering the simulation context — the framework's
-    # ensure_session_routing barrier only covers subs declared before __aenter__.
+    # Declare subscriber BEFORE entering the simulation context — the
+    # framework's routing barrier only covers subs declared before __aenter__.
     _sub = await asyncio.to_thread(lambda: zenoh_session.declare_subscriber(tx_topic, on_msg))
 
     simulation.add_node(node_id=0, dtb=dtb_path, kernel=kernel_path, extra_args=extra_args)

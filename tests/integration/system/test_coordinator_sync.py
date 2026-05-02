@@ -205,24 +205,9 @@ async def test_coordinator_fast_node_race(zenoh_router: str, zenoh_session: zeno
     QuantumBarrier.reset().
     """
     from tools.testing.virtmcu_test_suite.artifact_resolver import get_rust_binary_path
-
-    cmd = [
-        str(get_rust_binary_path("zenoh_coordinator")),
-        "--pdes",
-        "--nodes",
-        "1",
-        "--connect",
-        zenoh_router,
-    ]
-    coord_task = asyncio.create_subprocess_exec(*cmd, stdout=None, stderr=None)
-    proc = await coord_task
+    from tools.testing.virtmcu_test_suite.conftest_core import coordinator_subprocess
 
     s = zenoh_session
-    # Give coordinator a moment to start and declare liveliness
-    from tools.testing.virtmcu_test_suite.conftest_core import wait_for_zenoh_discovery
-
-    await wait_for_zenoh_discovery(s, "sim/coordinator/liveliness")
-
     done_topic = "sim/coord/0/done"
     start_topic = "sim/clock/start/0"
 
@@ -240,42 +225,37 @@ async def test_coordinator_fast_node_race(zenoh_router: str, zenoh_session: zeno
         quanta_completed += 1
         loop.call_soon_threadsafe(start_event.set)
 
+    # Declare subscriber BEFORE entering the coordinator context — the framework's
+    # routing barrier inside coordinator_subprocess covers it.
     sub = s.declare_subscriber(start_topic, on_start)
 
-    # This test bypasses the Simulation framework (no QEMU, raw zenoh_session),
-    # so the framework's automatic router barrier does not apply here. We must
-    # call ensure_session_routing explicitly to guarantee the subscriber above
-    # has propagated to the router before the coordinator starts publishing
-    # `start` events. See test_coordinator_sync.py for the standard pattern.
-    from tools.testing.virtmcu_test_suite.conftest_core import ensure_session_routing
-
-    # ENSURE_ROUTING_EXCEPTION: bypasses Simulation framework
-    await ensure_session_routing(s)
-
-    async def _probe_ready() -> None:
-        while True:
-            replies = await asyncio.to_thread(
-                lambda: list(s.get("sim/coordinator/ready_probe", timeout=0.5))
-            )
-            if replies and any(getattr(r, "ok", None) is not None for r in replies):
-                return
-
-    await asyncio.wait_for(_probe_ready(), timeout=5.0)
-
-    # Kickstart the coordinator
-    s.put("sim/coord/0/done", (1).to_bytes(8, "little"))
-
     try:
-        # Wait for 100 quanta to fly by. If race condition exists, this will hang infinitely.
-        async with asyncio.timeout(5.0):
-            while quanta_completed < max_quanta:
-                await start_event.wait()
-                start_event.clear()
-    except TimeoutError:
-        proc.terminate()
-        await proc.wait()
-        pytest.fail(f"Coordinator stalled after {quanta_completed} quanta. Race condition likely triggered.")
+        async with coordinator_subprocess(
+            binary=get_rust_binary_path("zenoh_coordinator"),
+            args=["--pdes", "--nodes", "1", "--connect", zenoh_router],
+            zenoh_session=s,
+        ):
+            # Coordinator-state probe (separate from the routing barrier the
+            # framework already ran): wait for the queryable handler to be live.
+            async def _probe_ready() -> None:
+                while True:
+                    replies = await asyncio.to_thread(
+                        lambda: list(s.get("sim/coordinator/ready_probe", timeout=0.5))
+                    )
+                    if replies and any(getattr(r, "ok", None) is not None for r in replies):
+                        return
 
-    proc.terminate()
-    await proc.wait()
-    typing.cast(typing.Any, sub).undeclare()
+            await asyncio.wait_for(_probe_ready(), timeout=5.0)
+
+            # Kickstart the coordinator
+            s.put("sim/coord/0/done", (1).to_bytes(8, "little"))
+
+            # Wait for 100 quanta to fly by. If a race exists, this hangs.
+            async with asyncio.timeout(5.0):
+                while quanta_completed < max_quanta:
+                    await start_event.wait()
+                    start_event.clear()
+    except TimeoutError:
+        pytest.fail(f"Coordinator stalled after {quanta_completed} quanta. Race condition likely triggered.")
+    finally:
+        typing.cast(typing.Any, sub).undeclare()

@@ -25,8 +25,10 @@ if TYPE_CHECKING:
     pass
 
 __all__ = [
+    "CoordinatorHandle",
     "QmpBridge",
     "VirtualTimeAuthority",
+    "coordinator_subprocess",
     "ensure_session_routing",
     "get_time_multiplier",
     "inspection_bridge",
@@ -289,7 +291,6 @@ class VirtualTimeAuthority:
             self._liveliness_checked = True
 
         # SAFETY: Give QEMU a tiny bit of slack to finish its internal transition to the first barrier
-        await asyncio.sleep(0.5)  # SLEEP_EXCEPTION: initialization slack
 
         # Perform the 0-ns sync to ensure QEMU is perfectly frozen and ready
         # We use the returned vtimes to align our expectations, as some modes (like slaved-suspend)
@@ -500,6 +501,85 @@ async def simulation(
 async def time_authority(zenoh_session: zenoh.Session) -> VirtualTimeAuthority:
     """Fixture that provides a TimeAuthority."""
     return VirtualTimeAuthority(zenoh_session, [0])
+
+
+class CoordinatorHandle:
+    """
+    Async-context-managed handle to a Rust coordinator subprocess
+    (`zenoh_coordinator`, `deterministic_coordinator`, etc.).
+
+    Owns the full lifecycle:
+      1. Spawn the subprocess.
+      2. Liveliness barrier — wait for the coordinator's liveliness token
+         on `liveliness_topic` before yielding.
+      3. Router barrier — `ensure_session_routing(zenoh_session)` so any
+         subscribers the test declared BEFORE entering this context are
+         propagated to the router before the coordinator delivers traffic.
+      4. On exit: terminate, drain stderr/stdout, log.
+
+    The contract mirrors the `simulation` fixture: declare subscribers on
+    `zenoh_session` BEFORE `async with coordinator_subprocess(...) as coord:`,
+    and the framework guarantees they are routed by the time the context
+    yields. Tests therefore never need to call `ensure_session_routing`
+    or `wait_for_zenoh_discovery` themselves.
+    """
+
+    def __init__(
+        self,
+        proc: asyncio.subprocess.Process,
+        zenoh_session: zenoh.Session,
+    ) -> None:
+        self.proc = proc
+        self._session = zenoh_session
+
+    @property
+    def returncode(self) -> int | None:
+        return self.proc.returncode
+
+
+@contextlib.asynccontextmanager
+async def coordinator_subprocess(
+    *,
+    binary: str | Path,
+    args: list[str],
+    zenoh_session: zenoh.Session,
+    liveliness_topic: str = "sim/coordinator/liveliness",
+) -> AsyncGenerator[CoordinatorHandle]:
+    """
+    SOTA spawn-and-barrier helper for tests that drive a Rust coordinator
+    subprocess directly (no QEMU, no Simulation framework).
+
+    See `CoordinatorHandle` for the lifecycle contract.
+    """
+    cmd = [str(binary), *args]
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=os.environ.copy(),
+    )
+
+    try:
+        await wait_for_zenoh_discovery(zenoh_session, liveliness_topic)
+        await ensure_session_routing(zenoh_session)
+        yield CoordinatorHandle(proc, zenoh_session)
+    finally:
+        if proc.returncode is None:
+            proc.terminate()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=2.0)
+            except TimeoutError:
+                proc.kill()
+                await proc.wait()
+
+        if proc.stderr is not None:
+            stderr_bytes = await proc.stderr.read()
+            if stderr_bytes:
+                logger.info("coordinator stderr:\n%s", stderr_bytes.decode(errors="replace"))
+        if proc.stdout is not None:
+            stdout_bytes = await proc.stdout.read()
+            if stdout_bytes:
+                logger.debug("coordinator stdout:\n%s", stdout_bytes.decode(errors="replace"))
 
 
 @pytest_asyncio.fixture
@@ -939,7 +1019,6 @@ class TimeAuthority(VirtualTimeAuthority):
             self._liveliness_checked = True
 
         # SAFETY: Give QEMU a tiny bit of slack to finish its internal transition to the first barrier
-        await asyncio.sleep(0.5)  # SLEEP_EXCEPTION: initialization slack
 
         # Perform the 0-ns sync to ensure QEMU is perfectly frozen and ready
         # We use the returned vtimes to align our expectations, as some modes (like slaved-suspend)

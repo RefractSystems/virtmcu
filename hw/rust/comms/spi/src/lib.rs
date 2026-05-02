@@ -1,4 +1,5 @@
 use virtmcu_api::FlatBufferStructExt;
+use zenoh::Wait;
 extern crate alloc;
 
 use alloc::boxed::Box;
@@ -37,6 +38,7 @@ pub struct VirtmcuSPI {
 pub struct VirtmcuSPIBackend {
     transport: Arc<dyn virtmcu_api::DataTransport>,
     id: String,
+    pub _liveliness: Option<zenoh::liveliness::LivelinessToken>,
 }
 
 /* ── Logic ────────────────────────────────────────────────────────────────── */
@@ -163,7 +165,18 @@ pub unsafe extern "C" fn spi_realize(dev: *mut SSIPeripheral, errp: *mut *mut c_
         }
     };
 
-    let backend = Box::new(VirtmcuSPIBackend { transport, id: id_str });
+    let liveliness = if transport_name == "zenoh" {
+        match unsafe { transport_zenoh::get_or_init_session(router_ptr) } {
+            Ok(session) => {
+                let hb_topic = format!("sim/spi/liveliness/{}", s.node_id);
+                session.liveliness().declare_token(hb_topic).wait().ok()
+            }
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+    let backend = Box::new(VirtmcuSPIBackend { transport, id: id_str, _liveliness: liveliness });
 
     s.rust_state = Box::into_raw(backend);
 }
