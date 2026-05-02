@@ -23,8 +23,8 @@ def sync() -> None:
         logger.error("Error: ZENOH_VERSION not found in BUILD_DEPS")
         return
 
-    # 1. Update tools/zenoh_coordinator/Cargo.toml
-    for cargo_path in ["tools/zenoh_coordinator/Cargo.toml"]:
+    # 1. Update tools/deterministic_coordinator/Cargo.toml
+    for cargo_path in ["tools/deterministic_coordinator/Cargo.toml"]:
         if Path(cargo_path).exists():
             with Path(cargo_path).open() as f:
                 content = f.read()

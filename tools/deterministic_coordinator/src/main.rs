@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use deterministic_coordinator::barrier::{CoordMessage, QuantumBarrier};
 use deterministic_coordinator::topology::{self, Protocol};
+use virtmcu_api::{FlatBufferStructExt, ZenohFrameHeader};
 
 #[derive(Parser, Debug)]
 #[command(version, about = "Deterministic Coordinator", long_about = None)]
@@ -69,6 +70,7 @@ fn decode_batch(payload: &[u8]) -> Vec<CoordMessage> {
                         sequence_number: seq,
                         protocol: parse_protocol(proto),
                         payload: data,
+                        base_topic: None,
                     });
                 }
             }
@@ -93,6 +95,64 @@ fn encode_message(msg: &CoordMessage) -> Vec<u8> {
         .expect("Vec write failed");
     buf.extend_from_slice(&msg.payload);
     buf
+}
+
+fn parse_legacy_topic(topic: &str) -> Option<(Protocol, u32, String)> {
+    let parts: Vec<&str> = topic.split('/').collect();
+    if parts.len() < 3 {
+        return None;
+    }
+
+    // Typical formats:
+    // sim/eth/frame/<node_id>/tx
+    // virtmcu/uart/<id>/<node_id>/tx
+    // sim/lin/<node_id>/tx
+
+    if topic.contains("eth") {
+        if let Some(nid_str) = parts.iter().rev().nth(1) {
+            if let Ok(nid) = nid_str.parse::<u32>() {
+                let base = parts[..parts.len() - 2].join("/");
+                return Some((Protocol::Ethernet, nid, base));
+            }
+        }
+    } else if topic.contains("uart") {
+        if let Some(nid_str) = parts.iter().rev().nth(1) {
+            if let Ok(nid) = nid_str.parse::<u32>() {
+                let base = parts[..parts.len() - 2].join("/");
+                return Some((Protocol::Uart, nid, base));
+            }
+        }
+    } else if topic.contains("can") {
+        if let Some(nid_str) = parts.iter().rev().nth(1) {
+            if let Ok(nid) = nid_str.parse::<u32>() {
+                let base = parts[..parts.len() - 2].join("/");
+                return Some((Protocol::CanFd, nid, base));
+            }
+        }
+    } else if topic.contains("lin") {
+        if let Some(nid_str) = parts.iter().rev().nth(1) {
+            if let Ok(nid) = nid_str.parse::<u32>() {
+                let base = parts[..parts.len() - 2].join("/");
+                return Some((Protocol::Lin, nid, base));
+            }
+        }
+    } else if topic.contains("spi") {
+        if let Some(nid_str) = parts.iter().rev().nth(1) {
+            if let Ok(nid) = nid_str.parse::<u32>() {
+                let base = parts[..parts.len() - 2].join("/");
+                return Some((Protocol::Spi, nid, base));
+            }
+        }
+    } else if topic.contains("rf") {
+        if let Some(nid_str) = parts.iter().rev().nth(1) {
+            if let Ok(nid) = nid_str.parse::<u32>() {
+                let base = parts[..parts.len() - 2].join("/");
+                return Some((Protocol::Rf802154, nid, base));
+            }
+        }
+    }
+
+    None
 }
 
 #[tokio::main]
@@ -136,11 +196,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         run_unix_coordinator(args, topo, barrier, pcap_log).await
     } else {
         barrier.set_quantum(1);
-        run_zenoh_coordinator(args, topo, barrier, pcap_log).await
+        run_deterministic_coordinator(args, topo, barrier, pcap_log).await
     }
 }
 
-async fn run_zenoh_coordinator(
+async fn run_deterministic_coordinator(
     args: Args,
     topo: topology::TopologyGraph,
     barrier: Arc<QuantumBarrier>,
@@ -162,6 +222,17 @@ async fn run_zenoh_coordinator(
         .await
         .map_err(|e| format!("Failed to open Zenoh session: {}", e))?;
 
+    let sub = session
+        .declare_subscriber("**/tx")
+        .await
+        .map_err(|e| format!("Failed to declare subscriber: {}", e))?;
+    let sub_done = session
+        .declare_subscriber("sim/coord/*/done")
+        .await
+        .map_err(|e| format!("Failed to declare done subscriber: {}", e))?;
+
+    tracing::info!("Coordinator subscribers active");
+
     // Declare liveliness so nodes know a coordinator is active
     let liveliness_topic = "sim/coord/alive";
     let _liveliness = session
@@ -174,158 +245,194 @@ async fn run_zenoh_coordinator(
         liveliness_topic
     );
 
-    let sub = session
-        .declare_subscriber("sim/coord/*/*")
-        .await
-        .map_err(|e| format!("Failed to declare subscriber: {}", e))?;
-    tracing::info!("Coordinator subscriber active");
-
     let mut node_batches = std::collections::HashMap::new();
     let mut current_quantum: u64 = 1;
 
-    while let Ok(sample) = sub.recv_async().await {
-        let topic = sample.key_expr().as_str();
-        let parts: Vec<&str> = topic.split('/').collect();
-        if parts.len() >= 4 {
-            if let Ok(node_id) = parts[2].parse::<u32>() {
-                let action = parts[3];
-                if action == "tx" {
-                    let mut msgs = decode_batch(&sample.payload().to_bytes());
-                    node_batches
-                        .entry(node_id)
-                        .or_insert_with(Vec::new)
-                        .append(&mut msgs);
-                } else if action == "done" {
-                    let payload = sample.payload().to_bytes();
-                    let mut quantum = u64::MAX;
-                    if payload.len() >= 8 {
-                        let mut cursor = Cursor::new(&payload);
-                        quantum = cursor.read_u64::<LittleEndian>().unwrap_or(u64::MAX);
-                        if quantum != current_quantum {
-                            tracing::error!(
-                                "Quantum mismatch for node {}: expected {}, got {}",
-                                node_id,
-                                current_quantum,
-                                quantum
-                            );
+    loop {
+        tokio::select! {
+            Ok(sample) = sub.recv_async() => {
+                let topic = sample.key_expr().as_str();
+                let parts: Vec<&str> = topic.split('/').collect();
+
+                if topic.contains("sim/coord") && parts.len() >= 4 {
+                    if let Ok(node_id) = parts[2].parse::<u32>() {
+                        let action = parts[3];
+                        if action == "tx" {
+                            let mut msgs = decode_batch(&sample.payload().to_bytes());
+                            node_batches
+                                .entry(node_id)
+                                .or_insert_with(Vec::new)
+                                .append(&mut msgs);
                         }
                     }
+                } else if let Some((proto, node_id, base)) = parse_legacy_topic(topic) {
+                    let payload = sample.payload().to_bytes();
+                    if let Some(header) = ZenohFrameHeader::unpack_slice(&payload) {
+                        let data_start = virtmcu_api::ZENOH_FRAME_HEADER_SIZE;
+                        if payload.len() >= data_start + header.size() as usize {
+                            let data = payload[data_start..data_start + header.size() as usize].to_vec();
+                            node_batches
+                                .entry(node_id)
+                                .or_insert_with(Vec::new)
+                                .push(CoordMessage {
+                                    src_node_id: node_id,
+                                    dst_node_id: u32::MAX, // Broadcast by default for legacy
+                                    delivery_vtime_ns: header.delivery_vtime_ns(),
+                                    sequence_number: header.sequence_number(),
+                                    protocol: proto,
+                                    payload: data,
+                                    base_topic: Some(base),
+                                });
+                        }
+                    }
+                }
+            }
+            Ok(sample) = sub_done.recv_async() => {
+                let topic = sample.key_expr().as_str();
+                let parts: Vec<&str> = topic.split('/').collect();
+                if parts.len() >= 4 {
+                    if let Ok(node_id) = parts[2].parse::<u32>() {
+                        let payload = sample.payload().to_bytes();
+                        let mut quantum = u64::MAX;
+                        if payload.len() >= 8 {
+                            let mut cursor = Cursor::new(&payload);
+                            quantum = cursor.read_u64::<LittleEndian>().unwrap_or(u64::MAX);
+                            if quantum != current_quantum {
+                                tracing::error!(
+                                    "Quantum mismatch for node {}: expected {}, got {}",
+                                    node_id,
+                                    current_quantum,
+                                    quantum
+                                );
+                            }
+                        }
 
-                    let msgs = node_batches.remove(&node_id).unwrap_or_default();
+                        let msgs = node_batches.remove(&node_id).unwrap_or_default();
 
-                    match barrier.submit_done(node_id, quantum, current_quantum, msgs) {
-                        Ok(Some(sorted_msgs)) => {
-                            tracing::info!(
-                                "Quantum {} complete. Delivering {} messages.",
-                                current_quantum,
-                                sorted_msgs.len()
-                            );
-                            // All nodes done, deliver messages
-                            for msg in sorted_msgs {
-                                let mut target_nodes = Vec::new();
-                                if msg.dst_node_id == u32::MAX {
-                                    // Broadcast
-                                    if msg.protocol.is_wireless() {
-                                        target_nodes = topo.rf_neighbors(msg.src_node_id);
-                                    } else {
-                                        // Wired broadcast - deliver to all nodes on the same link
-                                        // This is a bit simplified: find any link that contains src and this protocol
-                                        for link in topo.wire_links() {
-                                            if link.protocol == msg.protocol
-                                                && link.nodes.contains(&msg.src_node_id)
-                                            {
-                                                for &node in &link.nodes {
-                                                    if node != msg.src_node_id {
-                                                        target_nodes.push(node);
+                        match barrier.submit_done(node_id, quantum, current_quantum, msgs) {
+                            Ok(Some(sorted_msgs)) => {
+                                tracing::info!(
+                                    "Quantum {} complete. Delivering {} messages.",
+                                    current_quantum,
+                                    sorted_msgs.len()
+                                );
+                                // All nodes done, deliver messages
+                                for msg in sorted_msgs {
+                                    let mut target_nodes = Vec::new();
+                                    if msg.dst_node_id == u32::MAX {
+                                        // Broadcast
+                                        if msg.protocol.is_wireless() {
+                                            target_nodes = topo.rf_neighbors(msg.src_node_id);
+                                        } else {
+                                            // Wired broadcast - deliver to all nodes on the same link
+                                            for link in topo.wire_links() {
+                                                if link.protocol == msg.protocol
+                                                    && link.nodes.contains(&msg.src_node_id)
+                                                {
+                                                    for &node in &link.nodes {
+                                                        if node != msg.src_node_id {
+                                                            target_nodes.push(node);
+                                                        }
                                                     }
                                                 }
                                             }
                                         }
-                                    }
-                                } else {
-                                    if topo.is_link_allowed(
-                                        msg.src_node_id,
-                                        msg.dst_node_id,
-                                        msg.protocol.clone(),
-                                    ) {
-                                        target_nodes.push(msg.dst_node_id);
-                                    }
-                                }
-
-                                if target_nodes.is_empty() && msg.dst_node_id != u32::MAX {
-                                    tracing::warn!(
-                                        "Topology violation: dropped {} message from {} to {}",
-                                        format!("{:?}", msg.protocol).to_uppercase(),
-                                        msg.src_node_id,
-                                        msg.dst_node_id
-                                    );
-                                    if let Some(log) = &mut pcap_log {
-                                        if let Err(e) = log.write_topology_violation(
+                                    } else {
+                                        if topo.is_link_allowed(
                                             msg.src_node_id,
                                             msg.dst_node_id,
-                                            msg.delivery_vtime_ns,
-                                            &msg.protocol,
-                                            &msg.payload,
+                                            msg.protocol.clone(),
                                         ) {
-                                            tracing::error!("Failed to write to PCAP log: {}", e);
+                                            target_nodes.push(msg.dst_node_id);
                                         }
                                     }
-                                    continue;
-                                }
 
-                                for target_node in target_nodes {
-                                    if let Some(log) = &mut pcap_log {
-                                        let mut logged_msg = msg.clone();
-                                        logged_msg.dst_node_id = target_node;
-                                        if let Err(e) = log.write_message(&logged_msg) {
-                                            tracing::error!("Failed to write to PCAP log: {}", e);
-                                        }
-                                    }
-                                    let rx_topic = format!("sim/coord/{}/rx", target_node);
-                                    let mut out_msg = msg.clone();
-                                    out_msg.dst_node_id = target_node; // Ensure dst matches even for broadcast
-                                    let payload = encode_message(&out_msg);
-                                    if let Err(e) = session.put(&rx_topic, payload).await {
-                                        tracing::error!(
-                                            "Failed to deliver message to {}: {}",
-                                            target_node,
-                                            e
+                                    if target_nodes.is_empty() && msg.dst_node_id != u32::MAX {
+                                        tracing::warn!(
+                                            "Topology violation: dropped {} message from {} to {}",
+                                            format!("{:?}", msg.protocol).to_uppercase(),
+                                            msg.src_node_id,
+                                            msg.dst_node_id
                                         );
+                                        if let Some(log) = &mut pcap_log {
+                                            if let Err(e) = log.write_topology_violation(
+                                                msg.src_node_id,
+                                                msg.dst_node_id,
+                                                msg.delivery_vtime_ns,
+                                                &msg.protocol,
+                                                &msg.payload,
+                                            ) {
+                                                tracing::error!("Failed to write to PCAP log: {}", e);
+                                            }
+                                        }
+                                        continue;
+                                    }
+
+                                    for target_node in target_nodes {
+                                        if let Some(log) = &mut pcap_log {
+                                            let mut logged_msg = msg.clone();
+                                            logged_msg.dst_node_id = target_node;
+                                            if let Err(e) = log.write_message(&logged_msg) {
+                                                tracing::error!("Failed to write to PCAP log: {}", e);
+                                            }
+                                        }
+
+                                        // Deliver to both coordinated AND legacy topics for compatibility
+                                        let rx_topic = format!("sim/coord/{}/rx", target_node);
+                                        let mut out_msg = msg.clone();
+                                        out_msg.dst_node_id = target_node;
+                                        let out_payload = encode_message(&out_msg);
+                                        let _ = session.put(&rx_topic, out_payload).await;
+
+                                        // Legacy delivery
+                                        let legacy_prefix = if let Some(base) = &msg.base_topic {
+                                            base.clone()
+                                        } else {
+                                            match msg.protocol {
+                                                Protocol::Ethernet => "sim/eth/frame".to_owned(),
+                                                Protocol::Uart => "virtmcu/uart".to_owned(),
+                                                Protocol::CanFd => "sim/can".to_owned(),
+                                                Protocol::Lin => "sim/lin".to_owned(),
+                                                Protocol::Spi => "sim/spi".to_owned(),
+                                                Protocol::Rf802154 => "sim/rf/ieee802154".to_owned(),
+                                                _ => "sim/unknown".to_owned(),
+                                            }
+                                        };
+                                        let legacy_rx_topic = format!("{}/{}/rx", legacy_prefix, target_node);
+                                        let legacy_payload = virtmcu_api::encode_frame(
+                                            msg.delivery_vtime_ns,
+                                            msg.sequence_number,
+                                            &msg.payload,
+                                        );
+                                        let _ = session.put(&legacy_rx_topic, legacy_payload).await;
                                     }
                                 }
-                            }
 
-                            if let Some(log) = &mut pcap_log {
-                                if let Err(e) = log.flush() {
-                                    tracing::error!("Failed to flush PCAP log: {}", e);
+                                if let Some(log) = &mut pcap_log {
+                                    let _ = log.flush();
+                                }
+
+                                // Send start to all nodes for NEXT quantum
+                                current_quantum += 1;
+                                for i in 0..args.nodes {
+                                    let start_topic = format!("sim/clock/start/{}", i);
+                                    let mut start_payload = Vec::new();
+                                    start_payload
+                                        .write_u64::<LittleEndian>(current_quantum)
+                                        .expect("Vec write failed");
+                                    let _ = session.put(&start_topic, start_payload).await;
                                 }
                             }
-
-                            // Send start to all nodes for NEXT quantum
-                            current_quantum += 1;
-                            for i in 0..args.nodes {
-                                let start_topic = format!("sim/clock/start/{}", i);
-                                let mut start_payload = Vec::new();
-                                start_payload
-                                    .write_u64::<LittleEndian>(current_quantum)
-                                    .expect("Vec write failed");
-                                if let Err(e) = session.put(&start_topic, start_payload).await {
-                                    tracing::error!("Failed to send start signal to {}: {}", i, e);
-                                }
+                            Ok(None) => {}
+                            Err(e) => {
+                                tracing::error!("Barrier error for node {}: {:?}", node_id, e);
                             }
-                        }
-                        Ok(None) => {
-                            // Waiting for others
-                        }
-                        Err(e) => {
-                            tracing::error!("Barrier error for node {}: {:?}", node_id, e);
                         }
                     }
                 }
             }
         }
     }
-    Ok(())
 }
 
 async fn run_unix_coordinator(

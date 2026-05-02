@@ -15,22 +15,22 @@ import contextlib
 import os
 import time
 import typing
-from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 import zenoh
 
 from tools.testing.utils import get_time_multiplier
-from tools.testing.virtmcu_test_suite.conftest_core import VirtualTimeAuthority
+from tools.testing.virtmcu_test_suite.artifact_resolver import get_rust_binary_path
+from tools.testing.virtmcu_test_suite.conftest_core import coordinator_subprocess
+from tools.testing.virtmcu_test_suite.constants import VirtmcuBinary
 
 if TYPE_CHECKING:
     from pathlib import Path
-    from typing import Any, cast
 
     import zenoh
 
-    from tools.testing.qmp_bridge import QmpBridge
+    from tools.testing.virtmcu_test_suite.simulation import Simulation
 
 
 _base_stall_timeout_ms = int(os.environ.get("VIRTMCU_STALL_TIMEOUT_MS", "5000"))
@@ -44,9 +44,7 @@ _COORDINATOR_DELIVERY_DELAY_S: float = 0.1
 
 @pytest.mark.asyncio
 async def test_coordinator_sync(
-    zenoh_router: str,
-    zenoh_session: zenoh.Session,
-    qemu_launcher: Callable[..., Coroutine[Any, Any, QmpBridge]],
+    simulation: Simulation,
     tmp_path: Path,
 ) -> None:
     """
@@ -83,46 +81,28 @@ peripherals:
 """
     )
 
-    # Both nodes use slaved-icount mode.  -icount is mandatory for slaved-icount:
-    # without it qemu_clock_get_ns() returns wall-clock time and quantum boundaries
-    # never trigger correctly.  stall-timeout is intentionally omitted so that
-    # VIRTMCU_STALL_TIMEOUT_MS is respected (CLAUDE.md §Clock §Stall-Timeout Contract).
-    icount_args = ["-icount", "shift=0,align=off,sleep=off"]
     clock_args_n1 = [
-        "-device",
-        f"virtmcu-clock,node=1,mode=slaved-icount,router={zenoh_router},coordinated=true",
+        "virtmcu-clock,coordinated=true",
         "-chardev",
-        f"virtmcu,id=chr1,node=1,router={zenoh_router},topic=sim/uart",
+        "virtmcu,id=chr1,topic=sim/uart",
         "-serial",
         "chardev:chr1",
     ]
     clock_args_n2 = [
-        "-device",
-        f"virtmcu-clock,node=2,mode=slaved-icount,router={zenoh_router},coordinated=true",
+        "virtmcu-clock,coordinated=true",
         "-chardev",
-        f"virtmcu,id=chr2,node=2,router={zenoh_router},topic=sim/uart",
+        "virtmcu,id=chr2,topic=sim/uart",
         "-serial",
         "chardev:chr2",
     ]
 
-    n1 = await qemu_launcher(
-        str(board_yaml),
-        firmware_path,
-        ignore_clock_check=True,
-        extra_args=["-S", *icount_args, *clock_args_n1],
-    )
-    n2 = await qemu_launcher(
-        str(board_yaml),
-        firmware_path,
-        ignore_clock_check=True,
-        extra_args=["-S", *icount_args, *clock_args_n2],
-    )
-
-    vta = VirtualTimeAuthority(zenoh_session, node_ids=[1, 2])
+    simulation.add_node(node_id=1, dtb=board_yaml, kernel=firmware_path, extra_args=clock_args_n1)
+    simulation.add_node(node_id=2, dtb=board_yaml, kernel=firmware_path, extra_args=clock_args_n2)
 
     # Event-driven coordinator: asyncio.Event per node, set from Zenoh callback thread
     # via call_soon_threadsafe to avoid cross-thread asyncio state mutation.
     loop = asyncio.get_running_loop()
+    zenoh_session = simulation._session
     done_events: dict[int, asyncio.Event] = {1: asyncio.Event(), 2: asyncio.Event()}
     uart_backlog: list[tuple[int, bytes]] = []
 
@@ -193,14 +173,12 @@ peripherals:
             await asyncio.to_thread(put_start_1)
             await asyncio.to_thread(put_start_2)
 
-    from tools.testing.virtmcu_test_suite.conftest_core import VirtmcuSimulation
-
-    sim = VirtmcuSimulation([n1, n2], vta)
-
     coord_task = asyncio.create_task(coordinator_loop())
 
     try:
-        async with sim:
+        async with simulation as sim:
+            vta = sim.vta
+            assert vta is not None
             # Single quantum step: both nodes execute 1 ms of virtual time.
             # The coordinator introduces _COORDINATOR_DELIVERY_DELAY_S before releasing
             # nodes, so this step must take at least that long.
@@ -223,31 +201,13 @@ peripherals:
 
 
 @pytest.mark.asyncio
-async def test_coordinator_fast_node_race(zenoh_router: str) -> None:
+async def test_coordinator_fast_node_race(zenoh_router: str, zenoh_session: zenoh.Session) -> None:
     """
     / Postmortem: Proves that a node can immediately send 'done' the moment it
     receives 'start', without the coordinator dropping it due to a race condition with
     QuantumBarrier.reset().
     """
-    from tools.testing.virtmcu_test_suite.artifact_resolver import get_rust_binary_path
-
-    cmd = [
-        str(get_rust_binary_path("zenoh_coordinator")),
-        "--pdes",
-        "--nodes",
-        "1",
-        "--connect",
-        zenoh_router,
-    ]
-    coord_task = asyncio.create_subprocess_exec(*cmd, stdout=None, stderr=None)
-    proc = await coord_task
-
-    s = zenoh.open(zenoh.Config())
-    # Give coordinator a moment to start and declare liveliness
-    from tools.testing.virtmcu_test_suite.conftest_core import wait_for_zenoh_discovery
-
-    await wait_for_zenoh_discovery(s, "sim/coordinator/liveliness")
-
+    s = zenoh_session
     done_topic = "sim/coord/0/done"
     start_topic = "sim/clock/start/0"
 
@@ -265,23 +225,25 @@ async def test_coordinator_fast_node_race(zenoh_router: str) -> None:
         quanta_completed += 1
         loop.call_soon_threadsafe(start_event.set)
 
+    # Declare subscriber BEFORE entering the coordinator context — the framework's
+    # routing barrier inside coordinator_subprocess covers it.
     sub = s.declare_subscriber(start_topic, on_start)
 
-    # Kickstart the coordinator
-    s.put("sim/coord/0/done", (1).to_bytes(8, "little"))
-
     try:
-        # Wait for 100 quanta to fly by. If race condition exists, this will hang infinitely.
-        async with asyncio.timeout(5.0):
-            while quanta_completed < max_quanta:
-                await start_event.wait()
-                start_event.clear()
-    except TimeoutError:
-        proc.terminate()
-        await proc.wait()
-        pytest.fail(f"Coordinator stalled after {quanta_completed} quanta. Race condition likely triggered.")
+        async with coordinator_subprocess(
+            binary=get_rust_binary_path(VirtmcuBinary.DETERMINISTIC_COORDINATOR),
+            args=["--nodes", "1", "--connect", zenoh_router],
+            zenoh_session=s,
+        ):
+            # Kickstart the coordinator
+            s.put("sim/coord/0/done", (1).to_bytes(8, "little"))
 
-    proc.terminate()
-    await proc.wait()
-    typing.cast(typing.Any, sub).undeclare()
-    typing.cast(typing.Any, s).close()
+            # Wait for 100 quanta to fly by. If a race exists, this hangs.
+            async with asyncio.timeout(5.0):
+                while quanta_completed < max_quanta:
+                    await start_event.wait()
+                    start_event.clear()
+    except TimeoutError:
+        pytest.fail(f"Coordinator stalled after {quanta_completed} quanta. Race condition likely triggered.")
+    finally:
+        typing.cast(typing.Any, sub).undeclare()

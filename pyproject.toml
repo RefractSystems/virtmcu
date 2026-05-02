@@ -106,11 +106,9 @@ module = [
     "Virtmcu.*",
     "virtmcu.*",
     "mmio_client.*",
-    "conftest",
     "zenoh.*",
     "pytest.*",
     "pytest_asyncio.*",
-    "robot.*",
     "pkg_resources.*",
 ]
 ignore_missing_imports = true
@@ -118,7 +116,6 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = [
     "pydantic.*",
-    "httpx.*",
     "mcp.*",
 ]
 follow_imports = "skip"

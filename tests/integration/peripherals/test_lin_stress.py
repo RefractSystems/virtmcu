@@ -23,8 +23,7 @@ from tools.testing.virtmcu_test_suite.factory import compile_dtb, compile_firmwa
 if TYPE_CHECKING:
     import zenoh
 
-    from tests.sim_types import SimulationCreator
-    from tools.testing.virtmcu_test_suite.conftest_core import VirtmcuSimulation
+    from tools.testing.virtmcu_test_suite.simulation import Simulation
 
 
 import flatbuffers
@@ -51,7 +50,7 @@ def create_lin_frame(vtime_ns: int, msg_type: int, data: bytes | None) -> bytear
 
 @pytest.mark.asyncio
 async def test_lin_stress(
-    simulation: SimulationCreator, zenoh_router: str, zenoh_session: zenoh.Session, tmp_path: Path
+    simulation: Simulation, zenoh_router: str, zenoh_session: zenoh.Session, tmp_path: Path
 ) -> None:
 
     tmpdir = tmp_path
@@ -118,9 +117,9 @@ async def test_lin_stress(
     sub = await asyncio.to_thread(lambda: session.declare_subscriber(tx_topic, on_bus_msg))
     pub = await asyncio.to_thread(lambda: session.declare_publisher(rx_topic))
 
-    logger.info(f"Starting QEMU with topic {lin_topic} using VirtmcuSimulation...")
-    sim: VirtmcuSimulation
-    async with await simulation(dtb, kernel, extra_args=extra_args, ignore_clock_check=True) as sim:
+    logger.info(f"Starting QEMU with topic {lin_topic} using Simulation...")
+    simulation.add_node(node_id=0, dtb=dtb, kernel=kernel, extra_args=extra_args)
+    async with simulation as sim:
         logger.info("Starting staggered frame injection...")
         step_ns = 1_000_000  # 1ms steps
         total_steps = 100

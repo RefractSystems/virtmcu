@@ -733,6 +733,7 @@ unsafe extern "C" fn clock_class_init(klass: *mut ObjectClass, _data: *const c_v
     virtmcu_qom::device_class_set_props!(dc, VIRT_CLOCK_PROPERTIES);
 }
 
+#[used]
 static VIRT_CLOCK_TYPE_INFO: TypeInfo = TypeInfo {
     name: c"virtmcu-clock".as_ptr(),
     parent: c"sys-bus-device".as_ptr(),

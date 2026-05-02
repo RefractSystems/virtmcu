@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 
 @pytest.mark.asyncio
-async def test_spi_topology_integrity(qemu_launcher: object, tmp_path: Path) -> None:
+async def test_spi_topology_integrity(inspection_bridge: object, tmp_path: Path) -> None:
     """
     Verify via QMP that child peripherals are correctly linked to their parent buses.
     """
@@ -62,7 +62,7 @@ peripherals:
     )
 
     # Boot QEMU
-    bridge = await cast(Any, qemu_launcher)(test_dtb, extra_args=["-S"])
+    bridge = await cast(Any, inspection_bridge)(test_dtb)
 
     # Find my_spi_echo. In arm-generic-fdt it's likely a child of its parent node.
     # Root nodes are named <name>@<address>.

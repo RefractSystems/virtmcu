@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 @pytest.mark.asyncio
-@pytest.mark.usefixtures("zenoh_router", "zenoh_coordinator")
+@pytest.mark.usefixtures("zenoh_router", "deterministic_coordinator")
 async def test_coordinator_scalability(zenoh_session: zenoh.Session) -> None:
     num_nodes = 50
     msgs_per_node = 50

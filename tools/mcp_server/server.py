@@ -178,7 +178,7 @@ def create_mcp_server() -> VirtmcuServer:
             ),
             Tool(
                 name="set_network_latency",
-                description="Communicates with the zenoh_coordinator to manipulate the simulated RF environment.",
+                description="Communicates with the deterministic_coordinator to manipulate the simulated RF environment.",
                 inputSchema={
                     "type": "object",
                     "properties": {
