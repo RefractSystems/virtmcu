@@ -33,7 +33,7 @@ def main() -> None:
     config.insert_json5("scouting/multicast/enabled", "false")
 
     logger.info(f"Connecting to Zenoh on {router}...")
-    session = zenoh.open(config)
+    session = zenoh.open(config)  # ZENOH_OPEN_EXCEPTION: standalone script executed by test
 
     topic = "sim/spi/spi0/0"
 

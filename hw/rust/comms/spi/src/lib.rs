@@ -211,6 +211,7 @@ pub unsafe extern "C" fn spi_class_init(klass: *mut ObjectClass, _data: *const c
     virtmcu_qom::device_class_set_props!(dc, VIRTM_SPI_PROPERTIES);
 }
 
+#[used]
 static VIRTM_SPI_TYPE_INFO: TypeInfo = TypeInfo {
     name: c"spi".as_ptr(),
     parent: TYPE_SSI_PERIPHERAL,

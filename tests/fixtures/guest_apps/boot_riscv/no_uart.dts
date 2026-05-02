@@ -31,24 +31,10 @@
         };
     };
 
-    /* Memory is handled automatically by QEMU 'virt' machine based on -m */
-    /* memory@80000000 {
-        device_type = "memory";
-        reg = <0x00 0x80000000 0x00 0x8000000>;
-    }; */
-
     soc {
         #address-cells = <0x02>;
         #size-cells = <0x02>;
         compatible = "simple-bus";
         ranges;
-
-        uart@10000000 {
-            interrupts = <0x0a>;
-            interrupt-parent = <&cpu0_intc>;
-            clock-frequency = <0x384000>;
-            reg = <0x00 0x10000000 0x00 0x100>;
-            compatible = "ns16550a";
-        };
     };
 };

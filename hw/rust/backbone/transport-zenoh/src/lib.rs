@@ -300,7 +300,7 @@ mod tests {
 
     #[no_mangle]
     extern "C" fn virtmcu_is_bql_locked() -> bool {
-        BQL_HELD_BY_ME.with(std::cell::Cell::get)
+        BQL_HELD_BY_ME.with(core::cell::Cell::get)
     }
     #[no_mangle]
     extern "C" fn virtmcu_safe_bql_lock() {

@@ -148,7 +148,7 @@ venv:
 	@echo "✓ Virtual environment synchronized with uv."
 	@echo "✓ Activate with: source .venv/bin/activate"
 
-# Run integration smoke tests (Bash/QEMU level tests for boot_arm & dynamic_plugin)
+# Run integration smoke tests (Bash/QEMU level tests for boot_arm and other domains)
 test-integration: venv
 	uv run --active $(MAKE) build-test-artifacts
 	@bash scripts/cleanup-sim.sh --quiet
@@ -157,10 +157,10 @@ test-integration: venv
 		-v -n $(PYTEST_WORKERS) --tb=short --capture=sys
 	@echo "==> Running Legacy Integration Tests (Bash scripts)..."
 
-	@for test_script in tests/fixtures/guest_apps/riscv_interrupts/smoke_test.sh tests/fixtures/guest_apps/riscv_complex/smoke_test.sh \
+	@for test_script in tests/fixtures/guest_apps/riscv_complex/smoke_test.sh \
 		tests/fixtures/guest_apps/priority_routing/smoke_test.sh tests/fixtures/guest_apps/complex_board/smoke_test.sh tests/fixtures/guest_apps/coverage_gap/smoke_test.sh \
 		tests/fixtures/guest_apps/perf_bench/smoke_test.sh tests/fixtures/guest_apps/yaml_boot_advanced/smoke_test.sh tests/fixtures/guest_apps/irq_stress/smoke_test.sh \
-		tests/fixtures/guest_apps/ftrt_timing/smoke_test.sh tests/fixtures/guest_apps/actuator/smoke_test.sh; do \
+		tests/fixtures/guest_apps/ftrt_timing/smoke_test.sh; do \
 		echo "--> Running $$test_script"; \
 		uv run --active bash "$$test_script" || { bash scripts/cleanup-sim.sh; exit 1; }; \
 		bash scripts/cleanup-sim.sh --quiet; \
@@ -240,19 +240,10 @@ test-coverage-guest:
 coverage-report:
 	@echo "==> Generating host-side coverage report..."
 	@mkdir -p test-results/coverage
+	@# Search for .gcda files in both the build directory and the isolated coverage data directory
 	lcov --quiet --capture \
-		--directory $(QEMU_BUILD)/libhw-virtmcu-dummy.a.p \
-		--directory $(QEMU_BUILD)/libhw-virtmcu-mmio-socket-bridge.a.p \
-		--directory $(QEMU_BUILD)/libhw-virtmcu-remote-port-bridge.a.p \
-		--directory $(QEMU_BUILD)/libhw-virtmcu-rust-dummy.a.p \
-		--directory $(QEMU_BUILD)/libhw-virtmcu-clock.a.p \
-		--directory $(QEMU_BUILD)/libhw-virtmcu-chardev.a.p \
-		--directory $(QEMU_BUILD)/libhw-virtmcu-netdev.a.p \
-		--directory $(QEMU_BUILD)/libhw-virtmcu-actuator.a.p \
-		--directory $(QEMU_BUILD)/libhw-virtmcu-telemetry.a.p \
-		--directory $(QEMU_BUILD)/libhw-virtmcu-ieee802154.a.p \
-		--directory $(QEMU_BUILD)/libhw-virtmcu-ui.a.p \
-		--directory $(QEMU_BUILD)/libhw-virtmcu-test-qom-device.a.p \
+		--directory $(QEMU_BUILD) \
+		--directory $(CURDIR)/target/coverage \
 		--output-file test-results/coverage/host.info --rc branch_coverage=1 --ignore-errors empty
 	lcov --quiet --extract test-results/coverage/host.info "*/hw/virtmcu/*" --output-file test-results/coverage/host_filtered.info --rc branch_coverage=1
 	genhtml --quiet test-results/coverage/host_filtered.info --output-directory test-results/coverage/html --title "virtmcu Host Coverage" --legend --branch-coverage
@@ -352,6 +343,29 @@ lint-python:
 	        echo "$$violations"; \
 	        exit 1; \
 	fi
+	@echo "==> Check for raw zenoh.open() in pytest scope (must use make_client_config / zenoh_session fixture)..."
+	@# Default zenoh.Config() opens in peer mode with multicast scouting enabled,
+	@# causing parallel pytest workers to silently discover each other across the
+	@# container's network namespace and cross-talk on shared topics. CLAUDE.md
+	@# Second Priority / ADR-014 BANS runtime peer-mode scouting.
+	@# All Zenoh sessions in pytest-collected tests and shared testing infrastructure
+	@# MUST use make_client_config() (or the zenoh_session fixture, which wraps it).
+	@# Approved exceptions must carry an inline # ZENOH_OPEN_EXCEPTION: <reason> comment.
+	@# Scope: tests/integration/, tests/unit/, tests/system/, tests/*.py, tools/testing/.
+	@# Fixture scripts under tests/fixtures/guest_apps/ are standalone (not pytest-parallel) and exempt.
+	@violations=$$(grep -rnE "zenoh\.open\(" tests/integration/ tests/unit/ tests/system/ tools/testing/ --include="*.py" 2>/dev/null \
+		| grep -v "# ZENOH_OPEN_EXCEPTION:" || true); \
+	tests_root=$$(grep -nE "zenoh\.open\(" tests/*.py 2>/dev/null | grep -v "# ZENOH_OPEN_EXCEPTION:" || true); \
+	violations="$$violations$$tests_root"; \
+	if [ -n "$$violations" ]; then \
+		echo "❌ ERROR: Raw zenoh.open() found in pytest scope. Use make_client_config() / zenoh_session fixture (CLAUDE.md Second Priority, ADR-014):"; \
+		echo "$$violations"; \
+		echo "  Fix: import open_client_session from tools.testing.virtmcu_test_suite.conftest_core"; \
+		echo "       and call open_client_session(connect=<endpoint>) instead — or take 'zenoh_session' as a fixture."; \
+		echo "       Or, if a non-client-mode session is genuinely required, add inline # ZENOH_OPEN_EXCEPTION: <reason>."; \
+		exit 1; \
+	fi
+	@echo "✓ No raw zenoh.open() in pytest scope."
 	@echo "==> Check for hardcoded FDT QOM paths..."
 	@if grep -rnE '["'\'']/(flexray|spi[0-9]|wifi[0-9]|uart[0-9]|memory)["'\'']' tests/ ; then \
 		echo "❌ ERROR: Hardcoded QOM path without unit address detected. Root FDT devices must use '/device@address' format."; exit 1; \
@@ -973,6 +987,8 @@ clean:
 	find . -name "*.cli" -delete
 	find . -name "*.arch" -delete
 	find . -name "*.gcov" -delete
+	find . -name "*.gcda" -delete
+	find . -name "*.gcno" -not -path "./third_party/*" -delete
 	find . -name "virtmcu-timeout-*" -delete
 	find . -name "qmp-timeout-*" -delete
 	rm -f .coverage

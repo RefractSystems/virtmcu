@@ -289,6 +289,7 @@ pub unsafe extern "C" fn actuator_class_init(klass: *mut ObjectClass, _data: *co
     virtmcu_qom::qdev::device_class_set_props_n(dc, VIRTMCU_ACTUATOR_PROPERTIES.as_ptr(), 5);
 }
 
+#[used]
 static VIRTMCU_ACTUATOR_TYPE_INFO: TypeInfo = TypeInfo {
     name: c"actuator".as_ptr(),
     parent: c"sys-bus-device".as_ptr(),

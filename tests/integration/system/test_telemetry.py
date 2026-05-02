@@ -26,7 +26,9 @@ logger = logging.getLogger(__name__)
 
 
 @pytest.mark.asyncio
-async def test_telemetry_emission(simulation: SimulationCreator, zenoh_router: str) -> None:
+async def test_telemetry_emission(
+    simulation: SimulationCreator, zenoh_router: str, zenoh_session: zenoh.Session
+) -> None:
     """
     1. Emission: Verify that guest-triggered telemetry reaches Zenoh.
     """
@@ -40,30 +42,39 @@ async def test_telemetry_emission(simulation: SimulationCreator, zenoh_router: s
     if not dtb.exists():
         subprocess.run([shutil.which("make") or "make", "-C", str(dtb.parent), "all"], check=True)
 
-    async with await simulation(dtb, kernel, extra_args=["-device", f"telemetry,node=0,router={zenoh_router}"]) as sim:
-        # sim: VirtmcuSimulation
+    captured = []
 
-        # Subscribe to telemetry topic
-        captured = []
+    def on_telemetry(sample: zenoh.Sample) -> None:
+        captured.append(sample.payload.to_bytes())
 
-        def on_telemetry(sample: zenoh.Sample) -> None:
-            captured.append(sample.payload.to_bytes())
+    __sub = await asyncio.to_thread(
+        lambda: zenoh_session.declare_subscriber("sim/telemetry/trace/0", on_telemetry)
+    )
 
-        __sub = await asyncio.to_thread(
-            lambda: sim.vta.session.declare_subscriber("sim/telemetry/trace/0", on_telemetry)
-        )
+    try:
+        async with await simulation(dtb, kernel, extra_args=["-device", f"telemetry,node=0,router={zenoh_router}"]) as sim:
+            from tools.testing.virtmcu_test_suite.conftest_core import wait_for_zenoh_discovery
 
-        from tools.testing.virtmcu_test_suite.conftest_core import wait_for_zenoh_discovery
+            await wait_for_zenoh_discovery(zenoh_session, "sim/telemetry/liveliness/0")
 
-        await wait_for_zenoh_discovery(sim.vta.session, "sim/telemetry/liveliness/0")
+            # Run until guest app emits something (it should at boot)
+            await sim.vta.step(100_000_000)
 
-        # Run until guest app emits something (it should at boot)
-        await sim.vta.step(100_000_000)
-        assert len(captured) > 0, "No telemetry captured"
+            # Wait a moment for async delivery
+            for _ in range(50):
+                if len(captured) > 0:
+                    break
+                await asyncio.sleep(0.1)  # SLEEP_EXCEPTION: waiting for zenoh message to arrive
+
+            assert len(captured) > 0, "No telemetry captured"
+    finally:
+        await asyncio.to_thread(__sub.undeclare)
 
 
 @pytest.mark.asyncio
-async def test_telemetry_integrity(simulation: SimulationCreator, zenoh_router: str) -> None:
+async def test_telemetry_integrity(
+    simulation: SimulationCreator, zenoh_router: str, zenoh_session: zenoh.Session
+) -> None:
     """
     2. Integrity: Verify FlatBuffers decoding of telemetry packets.
     """
@@ -77,23 +88,33 @@ async def test_telemetry_integrity(simulation: SimulationCreator, zenoh_router: 
     if not dtb.exists():
         subprocess.run([shutil.which("make") or "make", "-C", str(dtb.parent), "all"], check=True)
 
-    async with await simulation(dtb, kernel, extra_args=["-device", f"telemetry,node=0,router={zenoh_router}"]) as sim:
-        captured = []
+    captured = []
 
-        def on_telemetry(sample: zenoh.Sample) -> None:
-            captured.append(sample.payload.to_bytes())
+    def on_telemetry(sample: zenoh.Sample) -> None:
+        captured.append(sample.payload.to_bytes())
 
-        _sub = await asyncio.to_thread(
-            lambda: sim.vta.session.declare_subscriber("sim/telemetry/trace/0", on_telemetry)
-        )
-        from tools.testing.virtmcu_test_suite.conftest_core import wait_for_zenoh_discovery
+    _sub = await asyncio.to_thread(
+        lambda: zenoh_session.declare_subscriber("sim/telemetry/trace/0", on_telemetry)
+    )
 
-        await wait_for_zenoh_discovery(sim.vta.session, "sim/telemetry/liveliness/0")
-        await sim.vta.step(100_000_000)
+    try:
+        async with await simulation(dtb, kernel, extra_args=["-device", f"telemetry,node=0,router={zenoh_router}"]) as sim:
+            from tools.testing.virtmcu_test_suite.conftest_core import wait_for_zenoh_discovery
 
-        for pkt in captured:
-            # Task: Validate header and payload
-            assert len(pkt) > 0
+            await wait_for_zenoh_discovery(zenoh_session, "sim/telemetry/liveliness/0")
+            await sim.vta.step(100_000_000)
+
+            # Wait a moment for async delivery
+            for _ in range(50):
+                if len(captured) > 0:
+                    break
+                await asyncio.sleep(0.1)  # SLEEP_EXCEPTION: waiting for zenoh message to arrive
+
+            for pkt in captured:
+                # Task: Validate header and payload
+                assert len(pkt) > 0
+    finally:
+        await asyncio.to_thread(_sub.undeclare)
 
 
 @pytest.mark.asyncio

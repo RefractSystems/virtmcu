@@ -58,10 +58,14 @@ class SimulationOrchestrator:
             extra_args = []
 
         # Automatically setup determinism if not already provided
-        # It's better if we check if clock is already there, but we can assume Orchestrator owns it
         has_clock = any("clock" in str(arg) for arg in extra_args)
-        if not has_clock:
+        has_icount = any("icount" in str(arg) for arg in extra_args)
+        needs_icount = has_clock and any("slaved-icount" in str(arg) for arg in extra_args)
+
+        if not has_icount and (not has_clock or needs_icount):
             extra_args.extend(["-icount", "shift=0,align=off,sleep=off"])
+
+        if not has_clock:
             if self.transport:
                 extra_args.extend(["-device", self.transport.get_clock_device_str(node_id)])
             else:
@@ -103,6 +107,10 @@ class SimulationOrchestrator:
             )
 
         bridges = await asyncio.gather(*tasks)
+
+        from tools.testing.virtmcu_test_suite.conftest_core import ensure_session_routing
+        await ensure_session_routing(self.session)
+
         for config, bridge in zip(self._nodes_config, bridges, strict=True):
             self._nodes[config["id"]].bridge = bridge
             await bridge.start_emulation()

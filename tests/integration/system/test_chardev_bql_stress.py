@@ -86,9 +86,9 @@ async def test_chardev_flow_control_stress(
     bridge = await qemu_launcher(dtb, kernel, extra_args, ignore_clock_check=True)
 
     # Connect Zenoh to send/receive data
-    z_config = zenoh.Config()
-    z_config.insert_json5("connect/endpoints", f'["{router_endpoint}"]')
-    session = zenoh.open(z_config)
+    from tools.testing.virtmcu_test_suite.conftest_core import open_client_session
+
+    session = open_client_session(connect=router_endpoint)
 
     received_data = bytearray()
     received_event = asyncio.Event()

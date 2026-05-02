@@ -236,6 +236,7 @@ unsafe extern "C" fn netdev_class_init(klass: *mut ObjectClass, _data: *const c_
     }
 }
 
+#[used]
 static VIRTMCU_NETDEV_TYPE_INFO: TypeInfo = TypeInfo {
     name: c"netdev".as_ptr(),
     parent: c"sys-bus-device".as_ptr(),

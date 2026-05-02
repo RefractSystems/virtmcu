@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 
 from tools import vproto
+from tools.testing.virtmcu_test_suite.conftest_core import ensure_session_routing
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -323,6 +324,7 @@ async def test_coordinator_topology(
                 received_msgs.append(payload[vproto.SIZE_ZENOH_FRAME_HEADER :])
 
         sub1_rx = await asyncio.to_thread(lambda: zenoh_session.declare_subscriber(f"{topic}/1/rx", on_node1_rx))
+        await ensure_session_routing(zenoh_session)
 
         # 5. Inject P1 (X) to Node 0, it should NOT reach Node 1 RX
         msg = b"X"

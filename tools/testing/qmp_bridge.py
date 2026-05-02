@@ -16,8 +16,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from qemu.qmp import QMPClient
+from qemu.qmp.protocol import StateError
 
 from tools.testing.utils import get_time_multiplier
+
+# Suppress expected EOFError noise from qemu.qmp.protocol when QEMU stops
+logging.getLogger("qemu.qmp.protocol").setLevel(logging.WARNING)
 
 if TYPE_CHECKING:
     import zenoh
@@ -378,5 +382,5 @@ class QmpBridge:
             self._watchdog_task = None
 
         if self.is_connected:
-            with contextlib.suppress(EOFError):
+            with contextlib.suppress(EOFError, ConnectionResetError, StateError, BrokenPipeError, OSError):
                 await self.qmp.disconnect()

@@ -1,0 +1,9 @@
+peripherals:
+  - name: "0"
+    type: LIN
+  - name: "1"
+    type: LIN
+
+topology:
+  links:
+    - { type: "lin", nodes: ["0", "1"] }

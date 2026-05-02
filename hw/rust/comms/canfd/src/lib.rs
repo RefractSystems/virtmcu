@@ -527,6 +527,7 @@ unsafe extern "C" fn virtmcu_can_host_instance_finalize(obj: *mut Object) {
     }
 }
 
+#[used]
 static VIRTMCU_CAN_HOST_TYPE_INFO: TypeInfo = TypeInfo {
     name: TYPE_CAN_HOST_VIRTMCU,
     parent: c"can-host".as_ptr(),

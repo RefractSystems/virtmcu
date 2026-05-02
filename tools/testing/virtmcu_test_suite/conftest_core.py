@@ -28,7 +28,10 @@ __all__ = [
     "QmpBridge",
     "VirtmcuSimulation",
     "VirtualTimeAuthority",
+    "ensure_session_routing",
     "get_time_multiplier",
+    "make_client_config",
+    "open_client_session",
     "pytest_collection_modifyitems",
     "pytest_runtest_makereport",
     "qemu_launcher",
@@ -44,6 +47,63 @@ __all__ = [
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def make_client_config(
+    *,
+    connect: str | list[str],
+    listen: str | list[str] | None = None,
+    multicast: bool = False,
+) -> zenoh.Config:
+    """
+    Canonical builder for safe, deterministic Zenoh sessions.
+
+    Enforces the two non-negotiable invariants from CLAUDE.md (Second Priority,
+    ADR-014): client mode (no peer-mode scouting) and multicast scouting
+    disabled. Without these, Zenoh sessions in parallel pytest workers
+    silently discover each other across the container's network namespace and
+    cross-talk on shared topics — manifesting as "passes locally, fails on
+    gw3 at 78%" race conditions.
+
+    All Zenoh sessions in tests/ and tools/testing/ MUST be opened from a
+    config built by this helper (or via the `zenoh_session` fixture, which
+    wraps it). The lint gate `make lint-python` enforces this.
+    """
+    cfg = zenoh.Config()
+    endpoints = [connect] if isinstance(connect, str) else list(connect)
+    cfg.insert_json5("connect/endpoints", _json5_str_array(endpoints))
+    if listen is not None:
+        listen_eps = [listen] if isinstance(listen, str) else list(listen)
+        cfg.insert_json5("listen/endpoints", _json5_str_array(listen_eps))
+    cfg.insert_json5("scouting/multicast/enabled", "true" if multicast else "false")
+    cfg.insert_json5("mode", '"client"')
+    # Task 27.3: prevent deadlocks when blocking in query handlers.
+    with contextlib.suppress(Exception):
+        cfg.insert_json5("transport/shared/task_workers", "16")
+    return cfg
+
+
+def open_client_session(
+    *,
+    connect: str | list[str],
+    listen: str | list[str] | None = None,
+    multicast: bool = False,
+) -> zenoh.Session:
+    """
+    Synchronous convenience wrapper that opens a Zenoh session from the
+    canonical client config produced by `make_client_config(...)`.
+    Use this from non-async code paths and from tests that need a session
+    distinct from the `zenoh_session` fixture (e.g. multi-router topologies).
+    """
+    return zenoh.open(  # ZENOH_OPEN_EXCEPTION: canonical wrapper enforcing client mode + scouting=false
+        make_client_config(connect=connect, listen=listen, multicast=multicast)
+    )
+
+
+def _json5_str_array(values: list[str]) -> str:
+    """Render a Python list[str] as a JSON5 string array literal."""
+    escaped = [v.replace("\\", "\\\\").replace('"', '\\"') for v in values]
+    return "[" + ",".join(f'"{v}"' for v in escaped) + "]"
 
 
 def pack_clock_advance(delta_ns: int, mujoco_time_ns: int = 0, quantum_number: int = 0) -> bytes:
@@ -85,6 +145,33 @@ def get_zenoh_router_endpoint(session: zenoh.Session) -> str:
         "Failed to discover Zenoh router endpoint from session and VIRTMCU_ZENOH_ROUTER is not set. "
         "Ensure the Zenoh router is started and the session is connected."
     )
+
+
+async def ensure_session_routing(session: zenoh.Session, timeout: float = 5.0) -> None:
+    """
+    Block until the router has propagated this session's declarations.
+
+    `session.declare_subscriber(...)` returns when the local subscriber object
+    is created and the declaration message has been sent — but the router-side
+    propagation is asynchronous. Sending traffic before the router has
+    processed the declaration causes silently-dropped messages and "passes
+    locally, fails on gw3 at 78%" parallel-test races.
+
+    This helper performs a self-roundtrip via the Zenoh Liveliness API:
+    declare a unique liveliness token on this session, wait until the same
+    session can observe its own token via `liveliness().get()`, then
+    undeclare. The roundtrip proves the router has fully ingested the
+    session's declaration backlog. Subsequent puts/queries on subscribers
+    declared *before* this call are guaranteed to be routed.
+    """
+    real_timeout = timeout * get_time_multiplier()
+    probe_topic = f"sim/test/probe/{os.getpid()}/{id(session):x}"
+
+    token = await asyncio.to_thread(lambda: session.liveliness().declare_token(probe_topic))
+    try:
+        await wait_for_zenoh_discovery(session, probe_topic, timeout=real_timeout)
+    finally:
+        await asyncio.to_thread(cast(Any, token).undeclare)
 
 
 async def wait_for_zenoh_discovery(
@@ -326,14 +413,14 @@ async def zenoh_router() -> AsyncGenerator[str]:
     ]
 
     # Wait for router to be ready internally
-    config = zenoh.Config()
-    config.insert_json5("connect/endpoints", f'["{endpoint}"]')
-    config.insert_json5("mode", '"client"')
+    config = make_client_config(connect=endpoint)
 
     check_session: zenoh.Session | None = None
     for _ in range(int(100 * get_time_multiplier())):
         try:
-            check_session = await asyncio.to_thread(lambda: zenoh.open(config))
+            check_session = await asyncio.to_thread(
+                lambda: zenoh.open(config)  # ZENOH_OPEN_EXCEPTION: config built by make_client_config
+            )
             break
         except zenoh.ZError:
             await asyncio.sleep(0.05)  # SLEEP_EXCEPTION: waiting for Zenoh router TCP port
@@ -365,14 +452,10 @@ async def zenoh_router() -> AsyncGenerator[str]:
 @pytest_asyncio.fixture
 async def zenoh_session(zenoh_router: str) -> AsyncGenerator[zenoh.Session]:
     """Fixture that provides a Zenoh session connected to the router."""
-    config = zenoh.Config()
-    config.insert_json5("connect/endpoints", f'["{zenoh_router}"]')
-    config.insert_json5("scouting/multicast/enabled", "false")
-    config.insert_json5("mode", '"client"')
-    # Task 27.3: Increase task workers to prevent deadlocks when blocking in query handlers.
-    with contextlib.suppress(Exception):
-        config.insert_json5("transport/shared/task_workers", "16")
-    session = await asyncio.to_thread(lambda: zenoh.open(config))
+    config = make_client_config(connect=zenoh_router)
+    session = await asyncio.to_thread(
+        lambda: zenoh.open(config)  # ZENOH_OPEN_EXCEPTION: config built by make_client_config
+    )
 
     # Wait for session to connect to the router by waiting for the router's liveliness token
     try:
@@ -410,6 +493,9 @@ class VirtmcuSimulation:
         # orchestration doesn't advance QEMU_CLOCK_VIRTUAL before the test starts.
         if self.init_barrier:
             await self.vta.init()
+
+        # Guarantee router synchronization before starting emulation
+        await ensure_session_routing(self.vta.session)
 
         # 2. Bring-Up: Start the guest emulation
         for b in self.bridges:
@@ -582,11 +668,15 @@ async def zenoh_coordinator(
         coord_bin = get_rust_binary_path("zenoh_coordinator")
 
     pdes = getattr(request, "param", {}).get("pdes", False)
-    logger.info(f"Starting Zenoh Coordinator (nodes={n_nodes}, pdes={pdes}) connecting to {zenoh_router}...")
+    topology = getattr(request, "param", {}).get("topology", None)
+
+    logger.info(f"Starting Zenoh Coordinator (nodes={n_nodes}, pdes={pdes}, topology={topology}) connecting to {zenoh_router}...")
 
     cmd = [str(coord_bin), "--connect", zenoh_router, "--nodes", str(n_nodes)]
     if pdes:
         cmd.append("--pdes")
+    if topology:
+        cmd.extend(["--topology", str(topology)])
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
@@ -596,10 +686,10 @@ async def zenoh_coordinator(
     )
 
     # Wait for session to connect to the router
-    check_config = zenoh.Config()
-    check_config.insert_json5("connect/endpoints", f'["{zenoh_router}"]')
-    check_config.insert_json5("mode", '"client"')
-    check_session = await asyncio.to_thread(lambda: zenoh.open(check_config))
+    check_config = make_client_config(connect=zenoh_router)
+    check_session = await asyncio.to_thread(
+        lambda: zenoh.open(check_config)  # ZENOH_OPEN_EXCEPTION: config built by make_client_config
+    )
     try:
         await wait_for_zenoh_discovery(check_session, "sim/coordinator/liveliness")
     finally:

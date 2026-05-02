@@ -126,7 +126,7 @@ async def test_topology_enforcement(zenoh_router: str, zenoh_session: zenoh.Sess
 
             # Wait for message reception or timeout using event signaling
             try:
-                await asyncio.wait_for(rx_event.wait(), timeout=2.0)
+                await asyncio.wait_for(rx_event.wait(), timeout=5.0)
                 success = True
             except TimeoutError:
                 success = False

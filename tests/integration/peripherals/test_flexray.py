@@ -21,6 +21,8 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from tools.testing.virtmcu_test_suite.conftest_core import ensure_session_routing
+
 if TYPE_CHECKING:
     from typing import Any
 
@@ -43,6 +45,18 @@ def build_flexray_artifacts() -> Path:
     firmware_s = """
 .global _start
 _start:
+    /* Print BOOT to UART */
+    ldr r2, =0x09000000
+    mov r3, #66  /* 'B' */
+    str r3, [r2]
+    mov r3, #79  /* 'O' */
+    str r3, [r2]
+    str r3, [r2]
+    mov r3, #84  /* 'T' */
+    str r3, [r2]
+    mov r3, #10 /* '\\n' */
+    str r3, [r2]
+
     /* 1. Configure Message RAM via Interface */
 
     /* Slot 0: Frame ID = 10, for TX test */
@@ -97,9 +111,19 @@ loop:
     ldr r0, =0x09003410
     ldr r1, [r0]
 
-    /* Write to UART 0x09000000 */
+    /* Write to UART 0x09000000 - 4 bytes individually */
     ldr r2, =0x09000000
-    str r1, [r2]
+    /* Byte 0 */
+    strb r1, [r2]
+    /* Byte 1 */
+    lsr r3, r1, #8
+    strb r3, [r2]
+    /* Byte 2 */
+    lsr r3, r1, #16
+    strb r3, [r2]
+    /* Byte 3 */
+    lsr r3, r1, #24
+    strb r3, [r2]
 
     /* Clear Status */
     ldr r0, =0x09003408
@@ -139,7 +163,7 @@ SECTIONS {
     compatible = "arm,generic-fdt";
     #address-cells = <2>;
     #size-cells = <2>;
-    qemu_sysmem {
+    qemu_sysmem: qemu_sysmem {
         compatible = "qemu:system-memory";
         phandle = <0x01>;
     };
@@ -147,7 +171,7 @@ SECTIONS {
         compatible = "qemu-memory-region";
         qemu,ram = <1>;
         container = <1>;
-        reg = <0x0 0x40000000 0x0 0x10000000>;
+        reg = <0x0 0x40000000 0x0 0x08000000>;
     };
     cpus {
         #address-cells = <1>;
@@ -159,13 +183,16 @@ SECTIONS {
             memory = <0x01>;
         };
     };
-    flexray@09003000 {
+    flexray@9003000 {
         compatible = "flexray";
         reg = <0x0 0x09003000 0x0 0x4000>;
+        container = <1>;
     };
-    uart@09000000 {
+    pl011@9000000 {
         compatible = "pl011";
         reg = <0x0 0x09000000 0x0 0x1000>;
+        chardev = <0x00>;
+        container = <1>;
     };
 };
 """
@@ -214,6 +241,7 @@ async def test_flexray_zenoh_tx(simulation: SimulationCreator, zenoh_router: str
     sim: VirtmcuSimulation
     async with await simulation(dtb_path, kernel_path, extra_args=extra_args, ignore_clock_check=True) as sim:
         await asyncio.to_thread(lambda: sim.vta.session.declare_subscriber(tx_topic, on_msg))
+        await ensure_session_routing(sim.vta.session)
 
         # Run for 20ms virtual time
         for _ in range(100):
@@ -279,7 +307,6 @@ async def test_flexray_zenoh_rx(simulation: SimulationCreator, zenoh_router: str
         assert sim.bridge is not None
         uart_data = sim.bridge.uart_buffer_raw
         assert b"\xef\xbe\xad\xde" in uart_data
-
 
 @pytest.mark.asyncio
 async def test_flexray_stress(simulation: SimulationCreator, zenoh_router: str, tmp_path: Path) -> None:

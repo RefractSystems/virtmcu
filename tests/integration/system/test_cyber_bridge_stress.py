@@ -92,11 +92,10 @@ async def test_multi_node_stress(zenoh_router: str, tmp_path: Path) -> None:
     unique_prefix = f"sim/clock/{unique_id}"
 
     # Start Zenoh session for mock QEMU
-    conf = zenoh.Config()
-    # Force a local locator to ensure connectivity
+    from tools.testing.virtmcu_test_suite.conftest_core import open_client_session
+
     locator = zenoh_router
-    conf.insert_json5("connect/endpoints", f'["{locator}"]')
-    session = zenoh.open(conf)
+    session = open_client_session(connect=locator)
 
     node_vtimes = manager.dict(dict.fromkeys(range(num_nodes), 0))
 

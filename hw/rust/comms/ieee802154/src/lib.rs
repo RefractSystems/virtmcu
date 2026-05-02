@@ -254,6 +254,7 @@ extern "C" fn ieee802154_class_init(klass: *mut ObjectClass, _data: *const c_voi
     virtmcu_qom::device_class_set_props!(dc, VIRTM_802154_PROPERTIES);
 }
 
+#[used]
 static VIRTM_802154_TYPE_INFO: TypeInfo = TypeInfo {
     name: c"ieee802154".as_ptr(),
     parent: c"sys-bus-device".as_ptr(),

@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from tools.testing.virtmcu_test_suite.conftest_core import ensure_session_routing
+
 if TYPE_CHECKING:
     from pathlib import Path
     from typing import Any
@@ -87,6 +89,7 @@ async def test_actuator_zenoh_publish(simulation: SimulationCreator, zenoh_route
     sim: VirtmcuSimulation
     async with await simulation(dtb, kernel, nodes=[0], extra_args=extra_args, ignore_clock_check=True) as sim:
         sim.vta.session.declare_subscriber("firmware/control/**", on_sample)
+        await ensure_session_routing(sim.vta.session)
 
         success_1 = False
         success_2 = False

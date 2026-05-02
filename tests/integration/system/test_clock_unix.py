@@ -107,6 +107,11 @@ async def test_clock_unix_socket(qemu_launcher: object) -> None:
         await bridge.start_emulation()
 
         try:
+            # 1. Initial sync (vtime should be 0 or close to it)
+            vtime, _, err = await vta.step(0, 0)
+            assert err == 0
+            assert vtime < 1_000_000  # Should be at start
+
             # 2. Advance 1ms
             vtime, _, err = await vta.step(1_000_000, 1_000_000)
             assert err == 0

@@ -511,6 +511,7 @@ pub unsafe extern "C" fn lpuart_class_init(klass: *mut ObjectClass, _data: *cons
     device_class_set_props!(dc, LPUART_PROPERTIES);
 }
 
+#[used]
 static LPUART_TYPE_INFO: TypeInfo = TypeInfo {
     name: c"s32k144-lpuart".as_ptr(),
     parent: c"sys-bus-device".as_ptr(),

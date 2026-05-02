@@ -1001,6 +1001,7 @@ pub unsafe extern "C" fn char_virtmcu_class_init(klass: *mut ObjectClass, _data:
     cc.chr_ioctl = Some(virtmcu_chr_ioctl);
 }
 
+#[used]
 static CHAR_VIRTMCU_TYPE_INFO: TypeInfo = TypeInfo {
     name: c"chardev-virtmcu".as_ptr(),
     parent: c"chardev".as_ptr(),

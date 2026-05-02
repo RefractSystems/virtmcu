@@ -223,7 +223,7 @@ peripherals:
 
 
 @pytest.mark.asyncio
-async def test_coordinator_fast_node_race(zenoh_router: str) -> None:
+async def test_coordinator_fast_node_race(zenoh_router: str, zenoh_session: zenoh.Session) -> None:
     """
     / Postmortem: Proves that a node can immediately send 'done' the moment it
     receives 'start', without the coordinator dropping it due to a race condition with
@@ -242,7 +242,7 @@ async def test_coordinator_fast_node_race(zenoh_router: str) -> None:
     coord_task = asyncio.create_subprocess_exec(*cmd, stdout=None, stderr=None)
     proc = await coord_task
 
-    s = zenoh.open(zenoh.Config())
+    s = zenoh_session
     # Give coordinator a moment to start and declare liveliness
     from tools.testing.virtmcu_test_suite.conftest_core import wait_for_zenoh_discovery
 
@@ -267,6 +267,16 @@ async def test_coordinator_fast_node_race(zenoh_router: str) -> None:
 
     sub = s.declare_subscriber(start_topic, on_start)
 
+    async def _probe_ready() -> None:
+        while True:
+            replies = await asyncio.to_thread(
+                lambda: list(s.get("sim/coordinator/ready_probe", timeout=0.5))
+            )
+            if replies and any(getattr(r, "ok", None) is not None for r in replies):
+                return
+
+    await asyncio.wait_for(_probe_ready(), timeout=5.0)
+
     # Kickstart the coordinator
     s.put("sim/coord/0/done", (1).to_bytes(8, "little"))
 
@@ -284,4 +294,3 @@ async def test_coordinator_fast_node_race(zenoh_router: str) -> None:
     proc.terminate()
     await proc.wait()
     typing.cast(typing.Any, sub).undeclare()
-    typing.cast(typing.Any, s).close()

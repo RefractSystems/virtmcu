@@ -42,10 +42,13 @@ def _get_port() -> int:
 def mock_upstream_router() -> object:
     """Spins up an isolated local Zenoh router to act as the upstream."""
     endpoint = _get_endpoint()
+    # Router-mode session: listens on its own endpoint with no upstream connect.
+    # Multicast scouting is disabled to satisfy the no-discovery invariant
+    # (CLAUDE.md Second Priority / ADR-014).
     cfg = zenoh.Config()
     cfg.insert_json5("listen/endpoints", f'["{endpoint}"]')
     cfg.insert_json5("scouting/multicast/enabled", "false")
-    router = zenoh.open(cfg)
+    router = zenoh.open(cfg)  # ZENOH_OPEN_EXCEPTION: peer/router-mode session for an isolated test router
     yield router, endpoint
     typing.cast(typing.Any, router).close()
 
@@ -86,19 +89,22 @@ def test_jitter_proxy_routing(mock_upstream_router: tuple[zenoh.Session, str]) -
         qemu_handled_payload = query.payload.to_bytes() if query.payload else b""
         query.reply(query.key_expr, b"qemu_response")
 
+    from tools.testing.virtmcu_test_suite.conftest_core import open_client_session
+
     try:
         # 1. Mock QEMU: Connect to the proxy's backend listen port and declare a queryable.
-        qemu_cfg = zenoh.Config()
-        qemu_cfg.insert_json5("connect/endpoints", f'["{proxy_endpoint}"]')
-        qemu_cfg.insert_json5("scouting/multicast/enabled", "false")
-        qemu_session = zenoh.open(qemu_cfg)
+        for _ in range(50):
+            try:
+                qemu_session = open_client_session(connect=proxy_endpoint)
+                break
+            except zenoh.ZError:
+                mock_execution_delay(0.1)  # SLEEP_EXCEPTION: waiting for proxy to bind
+        else:
+            pytest.fail("Failed to connect to proxy endpoint")
         qemu_queryable = qemu_session.declare_queryable(f"{CLOCK_ADVANCE_PREFIX}0", mock_qemu_queryable)
 
         # 2. Mock TimeAuthority: Connect to the upstream router.
-        ta_cfg = zenoh.Config()
-        ta_cfg.insert_json5("connect/endpoints", f'["{upstream_url}"]')
-        ta_cfg.insert_json5("scouting/multicast/enabled", "false")
-        ta_session = zenoh.open(ta_cfg)
+        ta_session = open_client_session(connect=upstream_url)
 
         # Wait deterministically for the routing to stabilize.
         assert _wait_for_queryable(ta_session, f"{CLOCK_ADVANCE_PREFIX}0", timeout=5.0), "Routing failed to propagate"
@@ -140,12 +146,11 @@ def test_jitter_proxy_qemu_offline(mock_upstream_router: tuple[zenoh.Session, st
     proxy_thread = threading.Thread(target=proxy.run, daemon=True)
     proxy_thread.start()
 
+    from tools.testing.virtmcu_test_suite.conftest_core import open_client_session
+
     ta_session = None
     try:
-        ta_cfg = zenoh.Config()
-        ta_cfg.insert_json5("connect/endpoints", f'["{upstream_url}"]')
-        ta_cfg.insert_json5("scouting/multicast/enabled", "false")
-        ta_session = zenoh.open(ta_cfg)
+        ta_session = open_client_session(connect=upstream_url)
 
         # It might take a moment for the proxy to declare its queryable on the upstream.
         # Wait until the proxy itself responds (it will return an error because QEMU is missing).
@@ -179,13 +184,12 @@ def test_jitter_proxy_routing_storm_detection(mock_upstream_router: tuple[zenoh.
     proxy_thread = threading.Thread(target=proxy.run, daemon=True)
     proxy_thread.start()
 
+    from tools.testing.virtmcu_test_suite.conftest_core import open_client_session
+
     ta_session = None
     futures = []
     try:
-        ta_cfg = zenoh.Config()
-        ta_cfg.insert_json5("connect/endpoints", f'["{upstream_url}"]')
-        ta_cfg.insert_json5("scouting/multicast/enabled", "false")
-        ta_session = zenoh.open(ta_cfg)
+        ta_session = open_client_session(connect=upstream_url)
 
         # Wait for proxy queryable
         deadline = time.perf_counter() + 5.0

@@ -200,6 +200,7 @@ pub unsafe extern "C" fn ui_class_init(klass: *mut ObjectClass, _data: *const c_
     virtmcu_qom::qdev::device_class_set_props_n(dc, ZENOH_UI_PROPERTIES.as_ptr(), 3);
 }
 
+#[used]
 static ZENOH_UI_TYPE_INFO: TypeInfo = TypeInfo {
     name: c"ui".as_ptr(),
     parent: c"sys-bus-device".as_ptr(),

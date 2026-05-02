@@ -127,9 +127,9 @@ topology:
 
     bridge = await qemu_launcher(str(board_yaml), firmware_path, ignore_clock_check=True, extra_args=extra_args)
 
-    config = zenoh.Config()
-    config.insert_json5("connect/endpoints", f'["{zenoh_router}"]')
-    ta_session = await asyncio.to_thread(lambda: zenoh.open(config))
+    from tools.testing.virtmcu_test_suite.conftest_core import open_client_session
+
+    ta_session = await asyncio.to_thread(lambda: open_client_session(connect=zenoh_router))
     vta = VirtualTimeAuthority(ta_session, node_ids=[0])
 
     async with VirtmcuSimulation(bridge, vta):

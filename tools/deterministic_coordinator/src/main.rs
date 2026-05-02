@@ -162,6 +162,12 @@ async fn run_zenoh_coordinator(
         .await
         .map_err(|e| format!("Failed to open Zenoh session: {}", e))?;
 
+    let sub = session
+        .declare_subscriber("sim/coord/*/*")
+        .await
+        .map_err(|e| format!("Failed to declare subscriber: {}", e))?;
+    tracing::info!("Coordinator subscriber active");
+
     // Declare liveliness so nodes know a coordinator is active
     let liveliness_topic = "sim/coord/alive";
     let _liveliness = session
@@ -173,12 +179,6 @@ async fn run_zenoh_coordinator(
         "Coordinator liveliness token declared on {}",
         liveliness_topic
     );
-
-    let sub = session
-        .declare_subscriber("sim/coord/*/*")
-        .await
-        .map_err(|e| format!("Failed to declare subscriber: {}", e))?;
-    tracing::info!("Coordinator subscriber active");
 
     let mut node_batches = std::collections::HashMap::new();
     let mut current_quantum: u64 = 1;
