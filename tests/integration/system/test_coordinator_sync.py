@@ -22,7 +22,7 @@ import pytest
 import zenoh
 
 from tools.testing.utils import get_time_multiplier
-from tools.testing.virtmcu_test_suite.conftest_core import VirtualTimeAuthority
+from tools.testing.virtmcu_test_suite.conftest_core import VirtualTimeAuthority, ensure_session_routing
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -143,6 +143,7 @@ peripherals:
 
     done_sub = await asyncio.to_thread(declare_done)
     uart_sub = await asyncio.to_thread(declare_uart)
+    await ensure_session_routing(zenoh_session)
 
     async def coordinator_loop() -> None:
         """
@@ -266,6 +267,7 @@ async def test_coordinator_fast_node_race(zenoh_router: str, zenoh_session: zeno
         loop.call_soon_threadsafe(start_event.set)
 
     sub = s.declare_subscriber(start_topic, on_start)
+    await ensure_session_routing(s)
 
     async def _probe_ready() -> None:
         while True:

@@ -86,7 +86,7 @@ async def test_chardev_flow_control_stress(
     bridge = await qemu_launcher(dtb, kernel, extra_args, ignore_clock_check=True)
 
     # Connect Zenoh to send/receive data
-    from tools.testing.virtmcu_test_suite.conftest_core import open_client_session
+    from tools.testing.virtmcu_test_suite.conftest_core import ensure_session_routing, open_client_session
 
     session = open_client_session(connect=router_endpoint)
 
@@ -98,6 +98,7 @@ async def test_chardev_flow_control_stress(
         tx_topic, lambda sample: _on_tx(sample, received_data, received_event, expected_count, loop)
     )
     pub = session.declare_publisher(rx_topic)
+    await ensure_session_routing(session)
 
     # Time authority to drive the clock
     from tests.conftest import VirtualTimeAuthority

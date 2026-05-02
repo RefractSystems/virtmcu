@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 import pytest
 import zenoh
 
+from tools.testing.virtmcu_test_suite.conftest_core import ensure_session_routing
+
 if TYPE_CHECKING:
     from tests.sim_types import SimulationCreator
 
@@ -50,6 +52,7 @@ async def test_telemetry_emission(
     __sub = await asyncio.to_thread(
         lambda: zenoh_session.declare_subscriber("sim/telemetry/trace/0", on_telemetry)
     )
+    await ensure_session_routing(zenoh_session)
 
     try:
         async with await simulation(dtb, kernel, extra_args=["-device", f"telemetry,node=0,router={zenoh_router}"]) as sim:
@@ -96,6 +99,7 @@ async def test_telemetry_integrity(
     _sub = await asyncio.to_thread(
         lambda: zenoh_session.declare_subscriber("sim/telemetry/trace/0", on_telemetry)
     )
+    await ensure_session_routing(zenoh_session)
 
     try:
         async with await simulation(dtb, kernel, extra_args=["-device", f"telemetry,node=0,router={zenoh_router}"]) as sim:

@@ -19,6 +19,7 @@ import pytest
 import yaml
 
 from tools.testing.virtmcu_test_suite.artifact_resolver import resolve_rust_binary
+from tools.testing.virtmcu_test_suite.conftest_core import ensure_session_routing
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -52,7 +53,6 @@ async def test_topology_enforcement(zenoh_router: str, zenoh_session: zenoh.Sess
 
     # 2. Start coordinator with --topology
     from tools.testing.virtmcu_test_suite.process import AsyncManagedProcess
-
     async with AsyncManagedProcess(
         "stdbuf",
         "-oL",
@@ -83,6 +83,7 @@ async def test_topology_enforcement(zenoh_router: str, zenoh_session: zenoh.Sess
 
             _sub1 = await asyncio.to_thread(lambda: zenoh_session.declare_subscriber("sim/coord/1/rx", on_uart_rx))
             _sub2 = await asyncio.to_thread(lambda: zenoh_session.declare_subscriber("sim/coord/2/rx", on_eth_rx))
+            await ensure_session_routing(zenoh_session)
 
             # 4. Send an Ethernet frame from node 0 to node 2 (not in the graph) via Zenoh
             # Construct CoordMessage

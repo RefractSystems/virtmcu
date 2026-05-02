@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 
 from virtmcu.lin import LinFrame, LinMessageType
 
+from tools.testing.virtmcu_test_suite.conftest_core import ensure_session_routing
 from tools.testing.virtmcu_test_suite.factory import compile_dtb, compile_firmware
 from tools.testing.virtmcu_test_suite.orchestrator import SimulationOrchestrator
 
@@ -149,6 +150,7 @@ async def test_multi_node_lin(
             sim.add_node(node_id=0, dtb_path=str(master_dtb), kernel_path=str(master_kernel), extra_args=master_args)
             sim.add_node(node_id=1, dtb_path=str(slave_dtb), kernel_path=str(slave_kernel), extra_args=slave_args)
 
+            await ensure_session_routing(session)
             await sim.start()
 
             def condition_met() -> bool:

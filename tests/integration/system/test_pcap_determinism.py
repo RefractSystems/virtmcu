@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 
 from tools.testing.virtmcu_test_suite.artifact_resolver import resolve_rust_binary
-from tools.testing.virtmcu_test_suite.conftest_core import wait_for_zenoh_discovery
+from tools.testing.virtmcu_test_suite.conftest_core import ensure_session_routing, wait_for_zenoh_discovery
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -109,6 +109,7 @@ topology:
                     loop.call_soon_threadsafe(quantum_event.set)
 
             sub = await asyncio.to_thread(lambda: zenoh_session.declare_subscriber("sim/clock/start/0", on_start))
+            await ensure_session_routing(zenoh_session)
 
             try:
 

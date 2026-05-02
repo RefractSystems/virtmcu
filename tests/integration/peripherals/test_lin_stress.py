@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from tools.testing.virtmcu_test_suite.conftest_core import ensure_session_routing
 from tools.testing.virtmcu_test_suite.factory import compile_dtb, compile_firmware
 
 if TYPE_CHECKING:
@@ -117,6 +118,7 @@ async def test_lin_stress(
     rx_topic = f"{lin_topic}/0/rx"
     sub = await asyncio.to_thread(lambda: session.declare_subscriber(tx_topic, on_bus_msg))
     pub = await asyncio.to_thread(lambda: session.declare_publisher(rx_topic))
+    await ensure_session_routing(session)
 
     logger.info(f"Starting QEMU with topic {lin_topic} using VirtmcuSimulation...")
     sim: VirtmcuSimulation

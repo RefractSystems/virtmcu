@@ -19,6 +19,7 @@ import pytest
 import yaml
 
 from tools.testing.virtmcu_test_suite.artifact_resolver import resolve_rust_binary
+from tools.testing.virtmcu_test_suite.conftest_core import ensure_session_routing
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -63,7 +64,6 @@ async def test_wireless_topology(zenoh_router: str, zenoh_session: zenoh.Session
 
     # 2. Start coordinator
     from tools.testing.virtmcu_test_suite.process import AsyncManagedProcess
-
     async with AsyncManagedProcess(
         "stdbuf",
         "-oL",
@@ -93,6 +93,7 @@ async def test_wireless_topology(zenoh_router: str, zenoh_session: zenoh.Session
 
             _sub1 = await asyncio.to_thread(lambda: zenoh_session.declare_subscriber("sim/coord/1/rx", on_rx_node1))
             _sub2 = await asyncio.to_thread(lambda: zenoh_session.declare_subscriber("sim/coord/2/rx", on_rx_node2))
+            await ensure_session_routing(zenoh_session)
 
             # 4. Send a wireless BROADCAST from node 0
             # Protocol 6 = Rf802154
