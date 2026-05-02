@@ -158,7 +158,7 @@ virtmcu/
 1. **NO Hardcoded Ports**: BANNED: fixed ports (`7447`, `7450`) anywhere. REQUIRED: `zenoh_router` fixture or `scripts/get-free-port.py`.
 2. **NO Hardcoded Paths**: BANNED: shared temp paths (e.g., `/tmp/yaml_boot/out.dtb`). REQUIRED: `pytest` `tmp_path` fixture or `mktemp -d`.
 3. **NO Random Collisions**: BANNED: `random.randint()` / generic UUIDs for node IDs. REQUIRED: deterministic uniqueness via `os.getpid()`, `worker_id`, or `tmp_path`.
-4. **NO Manual Process Management**: BANNED: spawning daemons (e.g., `zenoh_coordinator`) in test bodies. REQUIRED: centralized `pytest` fixtures with automated teardown.
+4. **NO Manual Process Management**: BANNED: spawning daemons (e.g., `deterministic_coordinator`) in test bodies. REQUIRED: centralized `pytest` fixtures with automated teardown.
 5. **Test Scope**: `pytest` scoped to `tests/` via `pyproject.toml`. Do NOT place test files in `tests/fixtures/guest_apps/<domain>/`.
 6. **Binary Resolution**: check both `target/release/` and `tools/<tool_name>/target/release/` for Rust tool binaries.
 

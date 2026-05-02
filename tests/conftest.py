@@ -10,6 +10,7 @@ import pytest_asyncio
 
 from tools.testing.virtmcu_test_suite.conftest_core import (
     VirtualTimeAuthority,
+    deterministic_coordinator,
     inspection_bridge,
     pytest_collection_modifyitems,
     pytest_runtest_makereport,
@@ -17,7 +18,6 @@ from tools.testing.virtmcu_test_suite.conftest_core import (
     qmp_bridge,
     simulation,
     time_authority,
-    zenoh_coordinator,
     zenoh_router,
     zenoh_session,
 )
@@ -38,7 +38,7 @@ __all__ = [
     "inspection_bridge",
     "simulation",
     "time_authority",
-    "zenoh_coordinator",
+    "deterministic_coordinator",
     "zenoh_router",
     "zenoh_session",
 ]
@@ -118,7 +118,7 @@ def pytest_sessionstart(session: pytest.Session) -> None:
         print("\n" + "=" * 80)
         print("ERROR: Manual subprocess spawning detected in test bodies.")
         print("Standard VirtMCU tests MUST NOT spawn processes manually.")
-        print("Use standard fixtures (qemu_launcher, zenoh_coordinator, etc.) instead.")
+        print("Use standard fixtures (qemu_launcher, deterministic_coordinator, etc.) instead.")
         print("-" * 80)
         for v in violations:
             print(f"  * {v}")

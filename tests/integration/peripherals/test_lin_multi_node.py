@@ -33,11 +33,11 @@ logger = logging.getLogger(__name__)
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "zenoh_coordinator",
+    "deterministic_coordinator",
     [{"nodes": 2, "pdes": True, "topology": "tests/fixtures/topologies/lin_2node.yml"}],
     indirect=True,
 )
-@pytest.mark.usefixtures("zenoh_coordinator")
+@pytest.mark.usefixtures("deterministic_coordinator")
 async def test_multi_node_lin(
     zenoh_router: str,
     zenoh_session: zenoh.Session,

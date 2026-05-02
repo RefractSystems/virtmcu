@@ -29,15 +29,15 @@ _STALL_TIMEOUT_MS = int(_base_stall_timeout_ms * get_time_multiplier())
 _VTA_TIMEOUT_S: float = max(30.0, _STALL_TIMEOUT_MS / 1000.0 + 10.0)
 
 
-@pytest.mark.parametrize("zenoh_coordinator", [{"nodes": 3, "pdes": True}], indirect=True)
+@pytest.mark.parametrize("deterministic_coordinator", [{"nodes": 3, "pdes": True}], indirect=True)
 @pytest.mark.asyncio
 async def test_stress(
-    zenoh_coordinator: asyncio.subprocess.Process,
+    deterministic_coordinator: asyncio.subprocess.Process,
     simulation: Simulation,
     tmp_path: Path,
 ) -> None:
     """
-    Stress tests the TA/Coordinator Synchronization Protocol using the REAL zenoh_coordinator.
+    Stress tests the TA/Coordinator Synchronization Protocol using the REAL deterministic_coordinator.
     Runs for 50 quanta to ensure the barrier logic does not deadlock or drop signals under load.
     """
     import logging
@@ -93,8 +93,8 @@ peripherals:
             logger.info(f"Coordinator {name}: {line.decode().strip()}")
 
     _output_tasks = [
-        asyncio.create_task(_stream_output(zenoh_coordinator.stdout, "STDOUT")),  # type: ignore[arg-type]
-        asyncio.create_task(_stream_output(zenoh_coordinator.stderr, "STDERR")),  # type: ignore[arg-type]
+        asyncio.create_task(_stream_output(deterministic_coordinator.stdout, "STDOUT")),  # type: ignore[arg-type]
+        asyncio.create_task(_stream_output(deterministic_coordinator.stderr, "STDERR")),  # type: ignore[arg-type]
     ]
 
     try:

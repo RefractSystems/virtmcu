@@ -103,8 +103,8 @@ async def test_interactive_echo(simulation: Simulation, tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("zenoh_coordinator", [{"nodes": 2, "pdes": True}], indirect=True)
-@pytest.mark.usefixtures("zenoh_coordinator")
+@pytest.mark.parametrize("deterministic_coordinator", [{"nodes": 2, "pdes": True}], indirect=True)
+@pytest.mark.usefixtures("deterministic_coordinator")
 async def test_multi_node_uart(simulation: Simulation, tmp_path: Path) -> None:
     """
     Multi-node UART over Zenoh.
@@ -230,8 +230,8 @@ async def test_multi_node_uart(simulation: Simulation, tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("zenoh_coordinator", [{"nodes": 1, "pdes": True}], indirect=True)
-@pytest.mark.usefixtures("zenoh_coordinator")
+@pytest.mark.parametrize("deterministic_coordinator", [{"nodes": 1, "pdes": True}], indirect=True)
+@pytest.mark.usefixtures("deterministic_coordinator")
 async def test_coordinator_topology(simulation: Simulation, tmp_path: Path) -> None:
     """
     Test Zenoh coordinator topology control (Packet Drop).

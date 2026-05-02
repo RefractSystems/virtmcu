@@ -257,11 +257,11 @@ build-test-artifacts:
 	@$(MAKE) -C tests/fixtures/guest_apps/actuator -j$(JOBS)
 	@$(MAKE) -C tests/fixtures/guest_apps/boot_riscv -j$(JOBS)
 	@$(MAKE) -C tests/fixtures/guest_apps/flexray_bridge -j$(JOBS)
-	@if [ "$$CI" = "true" ] && command -v zenoh_coordinator >/dev/null 2>&1; then \
+	@if [ "$$CI" = "true" ] && command -v deterministic_coordinator >/dev/null 2>&1; then \
 		echo "==> CI detected: Skipping Rust tools build (using pre-compiled binary in PATH)"; \
 	else \
-		echo "==> Building test tools (zenoh_coordinator, deterministic_coordinator, cyber_bridge)..."; \
-		cargo build --release -j$(JOBS) -p zenoh_coordinator -p deterministic_coordinator -p cyber_bridge; \
+		echo "==> Building test tools (deterministic_coordinator, cyber_bridge)..."; \
+		cargo build --release -j$(JOBS) -p deterministic_coordinator -p cyber_bridge; \
 	fi
 
 # Run the complete test suite: unit tests, integration smoke tests, Robot tests.
@@ -1006,7 +1006,7 @@ clean:
 	rm -f log.html report.html output.xml
 	rm -rf tools/cyber_bridge/target
 	rm -rf tools/systemc_adapter/build
-	rm -rf tools/zenoh_coordinator/target
+	rm -rf tools/deterministic_coordinator/target
 	rm -rf hw/rust/target
 	rm -rf $(QEMU_SRC)/build-virtmcu/install
 	rm -rf $(QEMU_SRC)/build-virtmcu-asan/install

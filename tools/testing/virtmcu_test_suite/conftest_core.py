@@ -45,7 +45,7 @@ __all__ = [
     "simulation",
     "time_authority",
     "wait_for_zenoh_discovery",
-    "zenoh_coordinator",
+    "deterministic_coordinator",
     "zenoh_router",
     "zenoh_session",
 ]
@@ -510,7 +510,7 @@ async def time_authority(zenoh_session: zenoh.Session) -> VirtualTimeAuthority:
 class CoordinatorHandle:
     """
     Async-context-managed handle to a Rust coordinator subprocess
-    (`zenoh_coordinator`, `deterministic_coordinator`, etc.).
+    (`deterministic_coordinator`, `deterministic_coordinator`, etc.).
 
     Owns the full lifecycle:
       1. Spawn the subprocess.
@@ -587,11 +587,11 @@ async def coordinator_subprocess(
 
 
 @pytest_asyncio.fixture
-async def zenoh_coordinator(
+async def deterministic_coordinator(
     zenoh_router: str, request: pytest.FixtureRequest
 ) -> AsyncGenerator[asyncio.subprocess.Process]:
     """
-    Fixture that starts the zenoh_coordinator.
+    Fixture that starts the deterministic_coordinator.
     """
     params = getattr(request, "param", {})
     n_nodes = params.get("nodes", 3)

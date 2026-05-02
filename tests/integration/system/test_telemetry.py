@@ -160,7 +160,7 @@ async def test_telemetry(simulation: Simulation, zenoh_router: str) -> None:
 @pytest.mark.asyncio
 async def test_coordinator_topology(simulation: Simulation, zenoh_router: str) -> None:
     """
-    5. Topology: zenoh_coordinator must correctly link nodes via queryables [P1]
+    5. Topology: deterministic_coordinator must correctly link nodes via queryables [P1]
     """
 
     import subprocess

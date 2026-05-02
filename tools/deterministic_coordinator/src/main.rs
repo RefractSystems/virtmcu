@@ -136,11 +136,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         run_unix_coordinator(args, topo, barrier, pcap_log).await
     } else {
         barrier.set_quantum(1);
-        run_zenoh_coordinator(args, topo, barrier, pcap_log).await
+        run_deterministic_coordinator(args, topo, barrier, pcap_log).await
     }
 }
 
-async fn run_zenoh_coordinator(
+async fn run_deterministic_coordinator(
     args: Args,
     topo: topology::TopologyGraph,
     barrier: Arc<QuantumBarrier>,
