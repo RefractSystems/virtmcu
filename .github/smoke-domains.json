@@ -9,7 +9,6 @@
   {"domain": "ftrt_timing",        "name": "FTRT Execution"},
   {"domain": "cyber_bridge",       "name": "Cyber-Physical Bridge"},
   {"domain": "riscv_complex",      "name": "RISC-V Expansion"},
-  {"domain": "riscv_interrupts",   "name": "RISC-V Remote Port"},
   {"domain": "telemetry_wfi",      "name": "Advanced Telemetry"},
   {"domain": "priority_routing",   "name": "Deterministic Priority"},
   {"domain": "complex_board",      "name": "Wireless & IoT"},

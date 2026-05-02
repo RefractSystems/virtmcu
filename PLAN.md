@@ -40,26 +40,20 @@ For every completed milestone, an automated integration test MUST be added to `t
 1. **DET-9** — Wireshark extcap plugin (Low priority / Redundant with INFRA-7).
 
 **Hardware / infrastructure (existing, continue in parallel with DET work):**
-2. **Milestone 27** — FlexRay IRQs + Bosch E-Ray Message RAM.
-3. **Milestones 21 / 22** — WiFi / Thread Protocol expansion.
-4. **Milestone 30.9 + 30.9.1** — Rust systemc-adapter + stress-adapter.
-5. **Milestone 30.8 + 30.10** — Firmware coverage (drcov) + unified reporting.
-6. **P12** — Deterministic Deadlock Detection (virtual-time budgets).
-7. **Milestone 32** — Vendor Firmware Validation (Ethernet & CAN-FD Binary Fidelity).
+1. **Milestones 21 / 22** — WiFi / Thread Protocol expansion.
+2. **Milestone 30.9 + 30.9.1** — Rust systemc-adapter + stress-adapter.
+3. **Milestone 30.8 + 30.10** — Firmware coverage (drcov) + unified reporting.
+4. **P12** — Deterministic Deadlock Detection (virtual-time budgets).
+5. **Milestone 32** — Vendor Firmware Validation (Ethernet & CAN-FD Binary Fidelity).
 
 ---
 
 ### [Hardware] Milestone 24 — CAN-FD (Bosch M_CAN) 🚧
+
 *Depends on: Milestone 19 (Rust QOM) ✅*
 - [ ] **24.1** Implement missing Bosch M_CAN register logic.
 - [ ] **24.2** Enable and verify CAN-FD frame payload delivery over Zenoh.
 - [ ] **24.3** Pass Vendor SDK loopback/echo tests (Link to Milestone 32.1).
-
-### [Hardware] Milestone 27 — FlexRay (Automotive) 🚧
-*Depends on: Milestone 5 (Bridge) ✅, Milestone 19 (Rust QOM) ✅*
-- [ ] **27.1.1** Add FlexRay Interrupts (IRQ lines).
-- [ ] **27.1.2** Implement Bosch E-Ray Message RAM Partitioning.
-- [ ] **27.2.1** Fix SystemC build regression (CMake 4.3.1 compatibility).
 
 ### [Hardware] Milestone 21 — WiFi (802.11) 🚧
 *Depends on: Milestone 20.5 (SPI)*

@@ -46,8 +46,14 @@ To ensure tests are 100% reproducible and immune to CI load (e.g., under ASan), 
 ### 🚫 Banned: `asyncio.sleep` and `time.sleep`
 Using `sleep` to wait for I/O or process initialization is non-deterministic. It will eventually flake.
 
-### ✅ Mandated: Event Signaling & Virtual Time
-Use the event-driven helpers provided by the `QmpBridge` and `SimulationTransport`:
+### 🚫 Banned: Raw `zenoh.open()` in Parallel Tests
+By default, Zenoh opens in peer mode with multicast scouting enabled. In parallel `pytest` runs, workers will silently discover each other across the network namespace and cross-talk on shared topics. This is the #1 cause of "passes locally, fails in CI" races.
+
+### ✅ Mandated: Client-Mode Isolation & Synchronization
+All Zenoh sessions MUST be opened in client mode with scouting disabled.
+1. **Isolation**: Use `make_client_config(connect=router_url)` to build a safe config.
+2. **Synchronization**: Use `await ensure_session_routing(session)` after declaring subscribers. This blocks until the router has propagated your declarations, preventing dropped messages during boot.
+
 ```python
 # ✅ CORRECT: Wakes instantly via signal, respects virtual time limits
 await bridge.wait_for_line_on_uart("INIT_DONE", timeout=10.0)
