@@ -80,6 +80,10 @@ fi
 if [ -f hw/riscv/virt.c ]; then
     echo "  -> Enabling dynamic sysbus devices (RISC-V)..."
     sed -i 's/MACHINE_CLASS(mc)->has_dynamic_sysbus = false;/MACHINE_CLASS(mc)->has_dynamic_sysbus = true;/' hw/riscv/virt.c
+    # virtmcu: allow specific virtmcu devices
+    if ! grep -q "virtmcu-clock" hw/riscv/virt.c; then
+        sed -i '/machine_class_allow_dynamic_sysbus_dev(mc, TYPE_UEFI_VARS_SYSBUS);/a \    machine_class_allow_dynamic_sysbus_dev(mc, "virtmcu-clock");\n    machine_class_allow_dynamic_sysbus_dev(mc, "mmio-socket-bridge");' hw/riscv/virt.c
+    fi
     # virtmcu: NOTE: We do NOT allow "sys-bus-device" globally on RISC-V because it causes
     # double-mapping of board-default devices (like UART) to the platform bus,
     # leading to Assertion `!subregion->container` failed.
