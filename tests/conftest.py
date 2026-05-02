@@ -10,6 +10,7 @@ import pytest_asyncio
 
 from tools.testing.virtmcu_test_suite.conftest_core import (
     VirtualTimeAuthority,
+    inspection_bridge,
     pytest_collection_modifyitems,
     pytest_runtest_makereport,
     qemu_launcher,
@@ -34,6 +35,7 @@ __all__ = [
     "pytest_runtest_makereport",
     "qemu_launcher",
     "qmp_bridge",
+    "inspection_bridge",
     "simulation",
     "time_authority",
     "zenoh_coordinator",

@@ -15,11 +15,13 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.sim_types import SimulationCreator
+    from tools.testing.virtmcu_test_suite.simulation import Simulation
+
+    
 
 
 @pytest.mark.asyncio
-async def test_qemu_crash_handling(simulation: SimulationCreator, tmp_path: Path) -> None:
+async def test_qemu_crash_handling(simulation: Simulation, tmp_path: Path) -> None:
     """
     Test how the bridge handles QEMU crashing mid-execution.
     """
@@ -32,7 +34,8 @@ async def test_qemu_crash_handling(simulation: SimulationCreator, tmp_path: Path
     kernel = workspace_root / "tests/fixtures/guest_apps/boot_arm/hello.elf"
 
     # Use simulation for robust process management
-    async with await simulation(dtb, kernel, ignore_clock_check=True) as sim:
+    simulation.add_node(node_id=0, dtb=dtb, kernel=kernel, extra_args=None)
+    async with simulation as sim:
         # Verify we can connect
         bridge = sim.bridge
         assert bridge is not None

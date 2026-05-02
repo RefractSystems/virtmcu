@@ -69,6 +69,7 @@ async def test_coordinator_barrier(zenoh_router: str, zenoh_session: zenoh.Sessi
 
                 _subs.append(await asyncio.to_thread(declare_sub, i))
 
+            # ENSURE_ROUTING_EXCEPTION: bypasses Simulation framework
             from tools.testing.virtmcu_test_suite.conftest_core import ensure_session_routing
             await ensure_session_routing(zenoh_session)
 

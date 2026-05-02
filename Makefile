@@ -69,7 +69,7 @@ else
   JOBS ?= $(shell nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
 endif
 
-.PHONY: all setup-initial build run clean clean-sim clean-debug distclean venv fmt fmt-python fmt-rust fmt-c fmt-meson fmt-yaml lint lint-python lint-python-types lint-rust lint-c lint-shell lint-docker lint-yaml lint-actions lint-meson lint-spelling check-ffi build-test-artifacts build-tools install-hooks sync-versions check-versions docker-dev docker-all docker-base docker-toolchain docker-devenv docker-builder docker-runtime ci-local ci-smoke ci-full perf-bench perf-check perf-baseline tag
+.PHONY: all setup-initial build run clean clean-sim clean-debug distclean venv fmt fmt-python fmt-rust fmt-c fmt-meson fmt-yaml lint lint-python lint-simulation-usage lint-python-types lint-rust lint-c lint-shell lint-docker lint-yaml lint-actions lint-meson lint-spelling check-ffi build-test-artifacts build-tools install-hooks sync-versions check-versions docker-dev docker-all docker-base docker-toolchain docker-devenv docker-builder docker-runtime ci-local ci-smoke ci-full perf-bench perf-check perf-baseline tag
 
 # By default, perform an incremental build
 all: build
@@ -398,9 +398,15 @@ lint-python:
 		exit 1; \
 	fi
 	@echo "✓ No oversized hardcoded timeouts in tests."
+	@$(MAKE) lint-simulation-usage
 	@echo "==> ruff check..."
 	@uv run --active ruff check .
 	@echo "✓ ruff passed."
+
+# Run Simulation Usage Lint
+lint-simulation-usage:
+	@echo "==> Simulation usage lint..."
+	@uv run --active python3 scripts/lint_simulation_usage.py
 # Run codespell to catch typos
 lint-spelling:
 	@echo "==> codespell..."

@@ -27,7 +27,7 @@ Read automatically by Codex and Gemini CLI at session start (`GEMINI.md` is a sy
 - **Zenoh Session Isolation**: All Zenoh sessions in Python tests MUST use `make_client_config()` or the `zenoh_session` fixture. Raw `zenoh.open()` is BANNED to prevent parallel test cross-talk (scouting=false, mode=client).
 - **Canonical tie-breaking**: same-vtime messages delivered in order `(delivery_vtime_ns, source_node_id, sequence_number)` by the coordinator — never by OS scheduling.
 - **Per-quantum barrier**: coordinator withholds quantum-Q messages until ALL nodes signal "quantum Q complete" (PDES barrier pattern).
-- **Deterministic Synchronization**: Use `ensure_session_routing(session)` to guarantee router-side propagation of declarations before starting emulation. This prevents "passes locally, fails in CI" races.
+- **Automated Synchronization (SOTA)**: The framework implicitly injects the `-S` flag to launch QEMU frozen, handles routing synchronization internally (`ensure_session_routing`), and issues `cont` via QMP. Do not manually call `ensure_session_routing` in tests.
 - **Stochastic seeding**: derive per-node PRNG as `seed_for_quantum(global_seed, node_id, quantum_number)`. `rand::thread_rng()` and wall-clock seeding are BANNED.
 - **Mobile nodes**: topology changes pushed by physics engine before each quantum step, never discovered at runtime.
 - Any feature producing different output across identical runs is a VirtMCU bug. See [ADR-014](docs/architecture/09-determinism-and-chaos.md).

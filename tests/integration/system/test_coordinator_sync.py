@@ -15,22 +15,19 @@ import contextlib
 import os
 import time
 import typing
-from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 import zenoh
 
 from tools.testing.utils import get_time_multiplier
-from tools.testing.virtmcu_test_suite.conftest_core import VirtualTimeAuthority, ensure_session_routing
 
 if TYPE_CHECKING:
     from pathlib import Path
-    from typing import Any, cast
 
     import zenoh
 
-    from tools.testing.qmp_bridge import QmpBridge
+    from tools.testing.virtmcu_test_suite.simulation import Simulation
 
 
 _base_stall_timeout_ms = int(os.environ.get("VIRTMCU_STALL_TIMEOUT_MS", "5000"))
@@ -44,9 +41,7 @@ _COORDINATOR_DELIVERY_DELAY_S: float = 0.1
 
 @pytest.mark.asyncio
 async def test_coordinator_sync(
-    zenoh_router: str,
-    zenoh_session: zenoh.Session,
-    qemu_launcher: Callable[..., Coroutine[Any, Any, QmpBridge]],
+    simulation: Simulation,
     tmp_path: Path,
 ) -> None:
     """
@@ -83,46 +78,28 @@ peripherals:
 """
     )
 
-    # Both nodes use slaved-icount mode.  -icount is mandatory for slaved-icount:
-    # without it qemu_clock_get_ns() returns wall-clock time and quantum boundaries
-    # never trigger correctly.  stall-timeout is intentionally omitted so that
-    # VIRTMCU_STALL_TIMEOUT_MS is respected (CLAUDE.md §Clock §Stall-Timeout Contract).
-    icount_args = ["-icount", "shift=0,align=off,sleep=off"]
     clock_args_n1 = [
-        "-device",
-        f"virtmcu-clock,node=1,mode=slaved-icount,router={zenoh_router},coordinated=true",
+        "virtmcu-clock,coordinated=true",
         "-chardev",
-        f"virtmcu,id=chr1,node=1,router={zenoh_router},topic=sim/uart",
+        "virtmcu,id=chr1,topic=sim/uart",
         "-serial",
         "chardev:chr1",
     ]
     clock_args_n2 = [
-        "-device",
-        f"virtmcu-clock,node=2,mode=slaved-icount,router={zenoh_router},coordinated=true",
+        "virtmcu-clock,coordinated=true",
         "-chardev",
-        f"virtmcu,id=chr2,node=2,router={zenoh_router},topic=sim/uart",
+        "virtmcu,id=chr2,topic=sim/uart",
         "-serial",
         "chardev:chr2",
     ]
 
-    n1 = await qemu_launcher(
-        str(board_yaml),
-        firmware_path,
-        ignore_clock_check=True,
-        extra_args=["-S", *icount_args, *clock_args_n1],
-    )
-    n2 = await qemu_launcher(
-        str(board_yaml),
-        firmware_path,
-        ignore_clock_check=True,
-        extra_args=["-S", *icount_args, *clock_args_n2],
-    )
-
-    vta = VirtualTimeAuthority(zenoh_session, node_ids=[1, 2])
+    simulation.add_node(node_id=1, dtb=board_yaml, kernel=firmware_path, extra_args=clock_args_n1)
+    simulation.add_node(node_id=2, dtb=board_yaml, kernel=firmware_path, extra_args=clock_args_n2)
 
     # Event-driven coordinator: asyncio.Event per node, set from Zenoh callback thread
     # via call_soon_threadsafe to avoid cross-thread asyncio state mutation.
     loop = asyncio.get_running_loop()
+    zenoh_session = simulation._session
     done_events: dict[int, asyncio.Event] = {1: asyncio.Event(), 2: asyncio.Event()}
     uart_backlog: list[tuple[int, bytes]] = []
 
@@ -143,7 +120,6 @@ peripherals:
 
     done_sub = await asyncio.to_thread(declare_done)
     uart_sub = await asyncio.to_thread(declare_uart)
-    await ensure_session_routing(zenoh_session)
 
     async def coordinator_loop() -> None:
         """
@@ -194,14 +170,12 @@ peripherals:
             await asyncio.to_thread(put_start_1)
             await asyncio.to_thread(put_start_2)
 
-    from tools.testing.virtmcu_test_suite.conftest_core import VirtmcuSimulation
-
-    sim = VirtmcuSimulation([n1, n2], vta)
-
     coord_task = asyncio.create_task(coordinator_loop())
 
     try:
-        async with sim:
+        async with simulation as sim:
+            vta = sim.vta
+            assert vta is not None
             # Single quantum step: both nodes execute 1 ms of virtual time.
             # The coordinator introduces _COORDINATOR_DELIVERY_DELAY_S before releasing
             # nodes, so this step must take at least that long.
@@ -267,6 +241,15 @@ async def test_coordinator_fast_node_race(zenoh_router: str, zenoh_session: zeno
         loop.call_soon_threadsafe(start_event.set)
 
     sub = s.declare_subscriber(start_topic, on_start)
+
+    # This test bypasses the Simulation framework (no QEMU, raw zenoh_session),
+    # so the framework's automatic router barrier does not apply here. We must
+    # call ensure_session_routing explicitly to guarantee the subscriber above
+    # has propagated to the router before the coordinator starts publishing
+    # `start` events. See test_coordinator_sync.py for the standard pattern.
+    # ENSURE_ROUTING_EXCEPTION: bypasses Simulation framework
+    from tools.testing.virtmcu_test_suite.conftest_core import ensure_session_routing
+
     await ensure_session_routing(s)
 
     async def _probe_ready() -> None:

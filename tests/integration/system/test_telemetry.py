@@ -8,10 +8,9 @@ from typing import TYPE_CHECKING
 import pytest
 import zenoh
 
-from tools.testing.virtmcu_test_suite.conftest_core import ensure_session_routing
-
 if TYPE_CHECKING:
-    from tests.sim_types import SimulationCreator
+    
+    from tools.testing.virtmcu_test_suite.simulation import Simulation
 
 
 """
@@ -29,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 @pytest.mark.asyncio
 async def test_telemetry_emission(
-    simulation: SimulationCreator, zenoh_router: str, zenoh_session: zenoh.Session
+    simulation: Simulation, zenoh_router: str, zenoh_session: zenoh.Session
 ) -> None:
     """
     1. Emission: Verify that guest-triggered telemetry reaches Zenoh.
@@ -52,10 +51,12 @@ async def test_telemetry_emission(
     __sub = await asyncio.to_thread(
         lambda: zenoh_session.declare_subscriber("sim/telemetry/trace/0", on_telemetry)
     )
-    await ensure_session_routing(zenoh_session)
 
     try:
-        async with await simulation(dtb, kernel, extra_args=["-device", f"telemetry,node=0,router={zenoh_router}"]) as sim:
+        simulation.add_node(
+            node_id=0, dtb=dtb, kernel=kernel, extra_args=["-device", f"telemetry,node=0,router={zenoh_router}"]
+        )
+        async with simulation as sim:
             from tools.testing.virtmcu_test_suite.conftest_core import wait_for_zenoh_discovery
 
             await wait_for_zenoh_discovery(zenoh_session, "sim/telemetry/liveliness/0")
@@ -76,7 +77,7 @@ async def test_telemetry_emission(
 
 @pytest.mark.asyncio
 async def test_telemetry_integrity(
-    simulation: SimulationCreator, zenoh_router: str, zenoh_session: zenoh.Session
+    simulation: Simulation, zenoh_router: str, zenoh_session: zenoh.Session
 ) -> None:
     """
     2. Integrity: Verify FlatBuffers decoding of telemetry packets.
@@ -99,10 +100,12 @@ async def test_telemetry_integrity(
     _sub = await asyncio.to_thread(
         lambda: zenoh_session.declare_subscriber("sim/telemetry/trace/0", on_telemetry)
     )
-    await ensure_session_routing(zenoh_session)
 
     try:
-        async with await simulation(dtb, kernel, extra_args=["-device", f"telemetry,node=0,router={zenoh_router}"]) as sim:
+        simulation.add_node(
+            node_id=0, dtb=dtb, kernel=kernel, extra_args=["-device", f"telemetry,node=0,router={zenoh_router}"]
+        )
+        async with simulation as sim:
             from tools.testing.virtmcu_test_suite.conftest_core import wait_for_zenoh_discovery
 
             await wait_for_zenoh_discovery(zenoh_session, "sim/telemetry/liveliness/0")
@@ -123,7 +126,7 @@ async def test_telemetry_integrity(
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("zenoh_session", "zenoh_router", "tmp_path")
-async def test_telemetry(simulation: SimulationCreator, zenoh_router: str) -> None:
+async def test_telemetry(simulation: Simulation, zenoh_router: str) -> None:
     """
     3. Telemetry Test: Verify Zenoh telemetry events are emitted.
     """
@@ -139,9 +142,13 @@ async def test_telemetry(simulation: SimulationCreator, zenoh_router: str) -> No
         subprocess.run([shutil.which("make") or "make", "-C", str(dtb_path.parent), "all"], check=True)
 
     # Use specialized app if available, else boot_arm
-    async with await simulation(
-        dtb_path, kernel_path, extra_args=["-device", f"telemetry,node=0,router={zenoh_router}"]
-    ) as sim:
+    simulation.add_node(
+        node_id=0,
+        dtb=dtb_path,
+        kernel=kernel_path,
+        extra_args=["-device", f"telemetry,node=0,router={zenoh_router}"],
+    )
+    async with simulation as sim:
         # Check for telemetry events
         # Note: we need to wait for guest app to reach telemetry emission code
         success = False
@@ -155,7 +162,7 @@ async def test_telemetry(simulation: SimulationCreator, zenoh_router: str) -> No
 
 
 @pytest.mark.asyncio
-async def test_coordinator_topology(zenoh_session: zenoh.Session, zenoh_router: str, qemu_launcher: object) -> None:
+async def test_coordinator_topology(simulation: Simulation, zenoh_router: str) -> None:
     """
     5. Topology: zenoh_coordinator must correctly link nodes via queryables [P1]
     """
@@ -163,7 +170,6 @@ async def test_coordinator_topology(zenoh_session: zenoh.Session, zenoh_router: 
     import subprocess
 
     from tools.testing.env import WORKSPACE_ROOT
-    from tools.testing.virtmcu_test_suite.orchestrator import SimulationOrchestrator
 
     workspace_root = WORKSPACE_ROOT
     dtb = workspace_root / "tests/fixtures/guest_apps/telemetry_wfi/test_telemetry.dtb"
@@ -171,15 +177,13 @@ async def test_coordinator_topology(zenoh_session: zenoh.Session, zenoh_router: 
     if not dtb.exists():
         subprocess.run([shutil.which("make") or "make", "-C", str(dtb.parent), "all"], check=True)
 
-    async with SimulationOrchestrator(zenoh_session, zenoh_router, qemu_launcher) as orch:
-        orch.add_node(0, str(dtb), str(kernel), extra_args=["-device", f"telemetry,node=0,router={zenoh_router}"])
-        orch.add_node(1, str(dtb), str(kernel), extra_args=["-device", f"telemetry,node=1,router={zenoh_router}"])
+    simulation.add_node(node_id=0, dtb=dtb, kernel=kernel, extra_args=["-device", f"telemetry,node=0,router={zenoh_router}"])
+    simulation.add_node(node_id=1, dtb=dtb, kernel=kernel, extra_args=["-device", f"telemetry,node=1,router={zenoh_router}"])
 
-        await orch.start()
-
+    async with simulation as sim:
         # Perform a step and verify both nodes advance
-        assert orch.vta is not None
-        res: dict[int, int] = await orch.vta.step(10_000_000)
+        assert sim.vta is not None
+        res: dict[int, int] = await sim.vta.step(10_000_000)
         assert 0 in res
         assert 1 in res
         assert res[0] == 10_000_000

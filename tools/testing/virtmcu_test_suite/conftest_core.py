@@ -26,10 +26,10 @@ if TYPE_CHECKING:
 
 __all__ = [
     "QmpBridge",
-    "VirtmcuSimulation",
     "VirtualTimeAuthority",
     "ensure_session_routing",
     "get_time_multiplier",
+    "inspection_bridge",
     "make_client_config",
     "open_client_session",
     "pytest_collection_modifyitems",
@@ -468,158 +468,29 @@ async def zenoh_session(zenoh_router: str) -> AsyncGenerator[zenoh.Session]:
     await asyncio.to_thread(session.close)
 
 
-class VirtmcuSimulation:
-    """
-    Enterprise-grade simulation orchestrator.
-    Handles the entire lifecycle: Bring-Up, Synchronization, and Teardown.
-    """
-
-    def __init__(
-        self, bridges: list[QmpBridge] | QmpBridge, vta: VirtualTimeAuthority, init_barrier: bool = True
-    ) -> None:
-        if isinstance(bridges, list):
-            self.bridges = bridges
-            self.bridge = bridges[0] if bridges else None
-        else:
-            self.bridges = [bridges]
-            self.bridge = bridges
-        self.vta = vta
-        self.init_barrier = init_barrier
-
-    async def __aenter__(self) -> VirtmcuSimulation:
-        # 1. Setup: Deterministic Initialization Barrier
-        # We perform the initial clock sync (vta.init -> step(0)) WHILE QEMU is
-        # still frozen (-S). This ensures that wall-clock drift during 
-        # orchestration doesn't advance QEMU_CLOCK_VIRTUAL before the test starts.
-        if self.init_barrier:
-            await self.vta.init()
-
-        # Guarantee router synchronization before starting emulation
-        await ensure_session_routing(self.vta.session)
-
-        # 2. Bring-Up: Start the guest emulation
-        for b in self.bridges:
-            if b:
-                await b.start_emulation()
-
-        # SAFETY: Give QEMU/Plugins a tiny bit of slack to start and register Zenoh handlers
-        await asyncio.sleep(0.5)  # SLEEP_EXCEPTION: bring-up slack
-
-        return self
-
-    async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
-        # 3. Teardown: Deterministic Cleanup
-        for b in self.bridges:
-            if b:
-                await b.close()
-
-
 @pytest_asyncio.fixture
 async def simulation(
-    qemu_launcher: Callable[..., Coroutine[Any, Any, QmpBridge]], zenoh_session: zenoh.Session, zenoh_router: str
-) -> AsyncGenerator[Callable[..., Coroutine[Any, Any, VirtmcuSimulation]]]:
+    qemu_launcher: Callable[..., Coroutine[Any, Any, QmpBridge]],
+    zenoh_session: zenoh.Session,
+    zenoh_router: str,
+) -> AsyncGenerator[Any]:
     """
-    Fixture that provides a declarative simulation environment.
+    SOTA single-entry-point simulation harness.
+
+    Returns a `Simulation` instance. Tests register nodes via `add_node(...)`
+    and enter the async context to run the canonical lifecycle:
+    spawn-frozen → liveliness barrier → router barrier → vta.init → cont.
+
+    See /workspace/docs/guide/03-testing-strategy.md §6 for usage.
     """
+    from tools.testing.virtmcu_test_suite.simulation import Simulation
 
-    async def _create_sim(
-        dtb_path: str | Path,
-        kernel_path: str | Path | None = None,
-        nodes: list[int] | None = None,
-        extra_args: list[str] | None = None,
-        **kwargs: object,
-    ) -> VirtmcuSimulation:
-        router_endpoint = zenoh_router
-        nodes_list = [0] if nodes is None else list(nodes)
-        extra_args_list = [] if extra_args is None else list(extra_args)
-
-        # Robustly inject router and standard properties into virtmcu devices
-        processed_args = []
-        has_clock = False
-
-        i = 0
-        while i < len(extra_args_list):
-            arg = str(extra_args_list[i])
-            if arg in ["-device", "-chardev", "-netdev"] and i + 1 < len(extra_args_list):
-                val = str(extra_args_list[i + 1])
-                if "virtmcu-clock" in val:
-                    has_clock = True
-                    if "router=" not in val:
-                        val = f"{val},router={router_endpoint}"
-                    if "node=" not in val:
-                        val = f"{val},node={nodes_list[0]}"
-                    if "mode=" not in val:
-                        val = f"{val},mode=slaved-icount"
-
-                    if "stall-timeout=" not in val:
-                        base_stall = int(os.environ.get("VIRTMCU_STALL_TIMEOUT_MS", "5000"))
-                        scaled_stall = int(base_stall * get_time_multiplier())
-                        val = f"{val},stall-timeout={scaled_stall}"
-
-                elif "virtmcu" in val:
-                    if "router=" not in val:
-                        val = f"{val},router={router_endpoint}"
-                processed_args.extend([arg, val])
-                i += 2
-            else:
-                if "virtmcu-clock" in arg:
-                    has_clock = True
-                    # If passed without -device, we assume caller wants it added correctly
-                    if "router=" not in arg:
-                        arg = f"{arg},router={router_endpoint}"
-                    if "node=" not in arg:
-                        arg = f"{arg},node={nodes_list[0]}"
-                    if "mode=" not in arg:
-                        arg = f"{arg},mode=slaved-icount"
-
-                    if "stall-timeout=" not in arg:
-                        base_stall = int(os.environ.get("VIRTMCU_STALL_TIMEOUT_MS", "5000"))
-                        scaled_stall = int(base_stall * get_time_multiplier())
-                        arg = f"{arg},stall-timeout={scaled_stall}"
-                    processed_args.extend(["-device", arg])
-
-                elif "virtmcu" in arg and arg not in ["-device", "-chardev", "-global"]:
-                    # Don't add prefix if the PREVIOUS argument was -global
-                    if i > 0 and extra_args_list[i - 1] == "-global":
-                        processed_args.append(arg)
-                    else:
-                        if "router=" not in arg:
-                            arg = f"{arg},router={router_endpoint}"
-                        # Decide if it's a device or chardev based on name
-                        prefix = "-chardev" if "virtmcu" in arg and "id=" in arg else "-device"
-                        processed_args.extend([prefix, arg])
-                else:
-                    processed_args.append(arg)
-                i += 1
-
-        # If no clock was provided, add a default one for orchestration
-        if not has_clock and nodes_list:
-            base_stall = int(os.environ.get("VIRTMCU_STALL_TIMEOUT_MS", "5000"))
-            scaled_stall = int(base_stall * get_time_multiplier())
-            processed_args.extend(
-                [
-                    "-device",
-                    f"virtmcu-clock,node={nodes_list[0]},router={router_endpoint},stall-timeout={scaled_stall},mode=slaved-icount",
-                ]
-            )
-        # Add standard icount configuration if slaved-icount is requested
-        if any("slaved-icount" in arg for arg in processed_args) and "-icount" not in processed_args:
-            processed_args.extend(["-icount", "shift=0,align=off,sleep=off"])
-
-        # Force -S (frozen) for deterministic boot synchronization
-        if "-S" not in processed_args:
-            processed_args.append("-S")
-
-        # Orchestrated simulations always use a clock, so we must bypass the Isolated isolation check
-        kwargs.setdefault("ignore_clock_check", True)
-
-        init_barrier = cast(bool, kwargs.pop("init_barrier", True))
-
-        bridge = await qemu_launcher(dtb_path, kernel_path, extra_args=processed_args, **kwargs)
-        vta = VirtualTimeAuthority(zenoh_session, nodes_list)
-        return VirtmcuSimulation(bridge, vta, init_barrier=init_barrier)
-
-    yield _create_sim
+    sim = Simulation(
+        zenoh_session=zenoh_session,
+        zenoh_router=zenoh_router,
+        qemu_launcher=qemu_launcher,
+    )
+    yield sim
 
 
 @pytest_asyncio.fixture
@@ -1002,6 +873,38 @@ async def qmp_bridge(qemu_launcher: Callable[..., Coroutine[Any, Any, QmpBridge]
     bridge = await qemu_launcher(dtb, kernel, extra_args=["-S"])
     await bridge.start_emulation()
     return bridge
+
+
+@pytest_asyncio.fixture
+async def inspection_bridge(
+    qemu_launcher: Callable[..., Coroutine[Any, Any, QmpBridge]],
+) -> AsyncGenerator[Callable[..., Coroutine[Any, Any, QmpBridge]]]:
+    """
+    Fixture that provides a callable to spawn a frozen QEMU node for introspection.
+
+    Never calls start_emulation(). Returns a frozen bridge — do not resume.
+    Signature: inspection_bridge(dtb_path, *, extra_args=None) -> QmpBridge
+    """
+
+    async def _inspect(
+        dtb_path: str | Path,
+        kernel_path: str | Path | None = None,
+        *,
+        extra_args: list[str] | None = None,
+    ) -> QmpBridge:
+        # We pass -S explicitly to ensure it's frozen.
+        args = list(extra_args or [])
+        if "-S" not in args:
+            args.append("-S")
+
+        return await qemu_launcher(
+            dtb_path=dtb_path,
+            kernel_path=kernel_path,
+            extra_args=args,
+            ignore_clock_check=True,
+        )
+
+    yield _inspect
 
 
 class TimeAuthority(VirtualTimeAuthority):

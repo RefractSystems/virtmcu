@@ -11,11 +11,11 @@ from typing import TYPE_CHECKING
 import pytest
 
 if TYPE_CHECKING:
-    from tests.sim_types import SimulationCreator
+    from tools.testing.virtmcu_test_suite.simulation import Simulation
 
 
 @pytest.mark.asyncio
-async def test_riscv_boot(simulation: SimulationCreator) -> None:
+async def test_riscv_boot(simulation: Simulation) -> None:
 
     from tools.testing.env import WORKSPACE_ROOT
 
@@ -33,10 +33,9 @@ async def test_riscv_boot(simulation: SimulationCreator) -> None:
             cwd=workspace_root,
         )
 
-    # Boot and check UART using VirtmcuSimulation
-    # We pass nodes=[] to disable clock orchestration (no virtmcu-clock device)
-    # as it is not yet supported on the RISC-V virt machine.
-    async with await simulation(dts, kernel, nodes=[], extra_args=["-m", "512M"]) as sim:
+    # Boot and check UART using Simulation
+    simulation.add_node(node_id=0, dtb=dts, kernel=kernel, extra_args=["-m", "512M"], orchestrated=False)
+    async with simulation as sim:
         # In non-orchestrated mode, we don't use vta.step()
         assert sim.bridge is not None
         assert await sim.bridge.wait_for_line_on_uart("HI RV", timeout=10.0)

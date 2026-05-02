@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -22,14 +21,12 @@ import pytest
 if TYPE_CHECKING:
     import zenoh
 
-    from tools.testing.virtmcu_test_suite.process import AsyncManagedProcess
+    from tools.testing.virtmcu_test_suite.simulation import Simulation
 
 
 from virtmcu.lin import LinFrame, LinMessageType
 
-from tools.testing.virtmcu_test_suite.conftest_core import ensure_session_routing
 from tools.testing.virtmcu_test_suite.factory import compile_dtb, compile_firmware
-from tools.testing.virtmcu_test_suite.orchestrator import SimulationOrchestrator
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +39,10 @@ logger = logging.getLogger(__name__)
 )
 @pytest.mark.usefixtures("zenoh_coordinator")
 async def test_multi_node_lin(
-    zenoh_router: str, qemu_launcher: Callable[..., AsyncManagedProcess], zenoh_session: zenoh.Session, tmp_path: Path
+    zenoh_router: str,
+    zenoh_session: zenoh.Session,
+    simulation: Simulation,
+    tmp_path: Path,
 ) -> None:
     tmpdir = tmp_path
 
@@ -144,14 +144,12 @@ async def test_multi_node_lin(
     sub0 = await asyncio.to_thread(lambda: session.declare_subscriber(f"{lin_topic}/0/tx", on_bus_msg))
     sub1 = await asyncio.to_thread(lambda: session.declare_subscriber(f"{lin_topic}/1/tx", on_bus_msg))
 
-    try:
-        async with SimulationOrchestrator(session, router_endpoint, qemu_launcher) as sim:
-            logger.info("Launching Master and Slave via Orchestrator...")
-            sim.add_node(node_id=0, dtb_path=str(master_dtb), kernel_path=str(master_kernel), extra_args=master_args)
-            sim.add_node(node_id=1, dtb_path=str(slave_dtb), kernel_path=str(slave_kernel), extra_args=slave_args)
+    simulation.add_node(node_id=0, dtb=master_dtb, kernel=master_kernel, extra_args=master_args)
+    simulation.add_node(node_id=1, dtb=slave_dtb, kernel=slave_kernel, extra_args=slave_args)
 
-            await ensure_session_routing(session)
-            await sim.start()
+    try:
+        async with simulation as sim:
+            logger.info("Launching Master and Slave via Simulation...")
 
             def condition_met() -> bool:
                 found_master_header = False
@@ -163,9 +161,9 @@ async def test_multi_node_lin(
                         found_slave_response = True
                 return found_master_header and found_slave_response
 
-            await sim.run_until(condition_met, timeout=120.0, step_ns=10_000_000)
+            await sim.run_until(condition_met, timeout=120.0, step_ns=1_000_000)
 
-            logger.info(f"SUCCESS: Multi-node LIN communication verified at vtime={sim._vtime_ns}!")
+            logger.info("SUCCESS: Multi-node LIN communication verified")
     finally:
         await asyncio.to_thread(sub0.undeclare)
         await asyncio.to_thread(sub1.undeclare)

@@ -19,14 +19,12 @@ from typing import TYPE_CHECKING
 import pytest
 import zenoh
 
-from tests.conftest import VirtualTimeAuthority
 from tools.testing.utils import yield_now
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
     from pathlib import Path
 
-    from tools.testing.virtmcu_test_suite.conftest_core import QmpBridge
+    from tools.testing.virtmcu_test_suite.simulation import Simulation
 
 
 logger = logging.getLogger(__name__)
@@ -39,7 +37,7 @@ async def _flood(noise_count: int, pub: zenoh.Publisher, noise_data: bytes) -> N
 
 @pytest.mark.asyncio
 async def test_clock_priority_isolation(
-    zenoh_router: str, zenoh_session: zenoh.Session, qemu_launcher: Callable[..., Awaitable[QmpBridge]], tmp_path: Path
+    zenoh_router: str, zenoh_session: zenoh.Session, simulation: Simulation, tmp_path: Path
 ) -> None:
     """
     STRESS TEST for Clock Session Priority Isolation.
@@ -110,30 +108,27 @@ topology:
         stderr=asyncio.subprocess.PIPE,
     )
 
+    from tools.testing.virtmcu_test_suite.conftest_core import open_client_session
+    from tools.testing.virtmcu_test_suite.transport import ZenohTransportImpl
+
+    ta_session = await asyncio.to_thread(lambda: open_client_session(connect=zenoh_router))
+    simulation.transport = ZenohTransportImpl(zenoh_router, ta_session)
+
     # Launch QEMU with clock (private session) and chardev (shared session)
+    # simulation handles router, node, mode=slaved-icount
     extra_args = [
-        "-S",
-        "-icount",
-        "shift=0,align=off,sleep=off",
-        "-device",
-        f"virtmcu-clock,node=0,mode=slaved-icount,router={zenoh_router}",
         "-chardev",
-        f"virtmcu,id=char0,node=0,router={zenoh_router},topic=sim/priority_test/uart",
+        "virtmcu,id=char0,topic=sim/priority_test/uart",
         "-serial",
         "chardev:char0",
     ]
 
-    from tools.testing.virtmcu_test_suite.conftest_core import VirtmcuSimulation
+    simulation.add_node(node_id=0, dtb=board_yaml, kernel=firmware_path, extra_args=extra_args)
 
-    bridge = await qemu_launcher(str(board_yaml), firmware_path, ignore_clock_check=True, extra_args=extra_args)
-
-    from tools.testing.virtmcu_test_suite.conftest_core import open_client_session
-
-    ta_session = await asyncio.to_thread(lambda: open_client_session(connect=zenoh_router))
-    vta = VirtualTimeAuthority(ta_session, node_ids=[0])
-
-    async with VirtmcuSimulation(bridge, vta):
-        try:
+    try:
+        async with simulation as sim:
+            vta = sim.vta
+            assert vta is not None
             # Baseline: Measure RTT with NO load
             rtts_baseline = []
             logger.info("\nMeasuring baseline RTT (10ms quanta)...")
@@ -177,8 +172,7 @@ topology:
 
             logger.info(f"Clock Jitter Increase: {(avg_stress - avg_baseline) * 1000:.2f} ms")
 
-        finally:
-            await asyncio.to_thread(ta_session.close)
-        await bridge.close()
+    finally:
+        await asyncio.to_thread(ta_session.close)
         coord_proc.terminate()
         await coord_proc.wait()
