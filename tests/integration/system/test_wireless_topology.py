@@ -19,6 +19,7 @@ import pytest
 import yaml
 
 from tools.testing.virtmcu_test_suite.artifact_resolver import resolve_rust_binary
+from tools.testing.virtmcu_test_suite.constants import VirtmcuBinary
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -35,7 +36,7 @@ async def test_wireless_topology(zenoh_router: str, zenoh_session: zenoh.Session
     Test Wireless Topology Enforcement.
     The coordinator delivers wireless messages based on distance.
     """
-    coordinator_bin = resolve_rust_binary("deterministic_coordinator")
+    coordinator_bin = resolve_rust_binary(VirtmcuBinary.DETERMINISTIC_COORDINATOR)
 
     # 1. Create a world YAML with wireless topology
     # Node 0 at (0,0,0)

@@ -286,6 +286,8 @@ Mandatory shutdown sequence:
 - **No Global Path Mutation**: BANNED: `os.chdir()`. Use absolute `pathlib.Path` objects or pass `cwd=` to `subprocess`.
 - **AST over Regex**: BANNED: using regex or string searches (`.find()`) to parse structured data like `.dtb`, JSON, or YAML. Use native parsers (e.g., the `fdt` library).
 - **First-Class Tooling**: Scripts in `tools/` and `scripts/` are production code. They must pass strict type-checking (`mypy`) and cannot use `# noqa` or `# type: ignore` to bypass architecture rules.
+- **No Hardcoded Binary Names**: BANNED: using literal strings like `"deterministic_coordinator"` in `get_rust_binary_path` or `resolve_rust_binary`. REQUIRED: Use `VirtmcuBinary.DETERMINISTIC_COORDINATOR` from `tools.testing.virtmcu_test_suite.constants`. CI enforces this via AST lints.
+
 
 ### 18. Lessons Learned (Anti-Patterns — Do Not Repeat)
 

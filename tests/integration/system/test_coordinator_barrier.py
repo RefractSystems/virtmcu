@@ -19,6 +19,7 @@ import zenoh
 
 from tools.testing.virtmcu_test_suite.artifact_resolver import resolve_rust_binary
 from tools.testing.virtmcu_test_suite.conftest_core import coordinator_subprocess
+from tools.testing.virtmcu_test_suite.constants import VirtmcuBinary
 
 if TYPE_CHECKING:
     pass
@@ -33,7 +34,7 @@ async def test_coordinator_barrier(zenoh_router: str, zenoh_session: zenoh.Sessi
     Test DeterministicCoordinator Quantum Barrier.
     3 nodes send messages to each other. We assert they are delivered in canonical order.
     """
-    coordinator_bin = resolve_rust_binary("deterministic_coordinator")
+    coordinator_bin = resolve_rust_binary(VirtmcuBinary.DETERMINISTIC_COORDINATOR)
 
     received_msgs: list[tuple[str, int, int, int, int, bytes]] = []
 

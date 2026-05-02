@@ -19,6 +19,7 @@ import pytest
 import yaml
 
 from tools.testing.virtmcu_test_suite.artifact_resolver import resolve_rust_binary
+from tools.testing.virtmcu_test_suite.constants import VirtmcuBinary
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -35,7 +36,7 @@ async def test_topology_enforcement(zenoh_router: str, zenoh_session: zenoh.Sess
     Test Topology-First YAML Loading.
     The coordinator enforces the static topology and drops packets not in the graph.
     """
-    coordinator_bin = resolve_rust_binary("deterministic_coordinator")
+    coordinator_bin = resolve_rust_binary(VirtmcuBinary.DETERMINISTIC_COORDINATOR)
 
     # 1. Create a world YAML with topology
     world_yaml = tmp_path / "world.yaml"

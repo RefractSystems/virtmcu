@@ -21,6 +21,9 @@ import pytest
 import zenoh
 
 from tools.testing.utils import get_time_multiplier
+from tools.testing.virtmcu_test_suite.artifact_resolver import get_rust_binary_path
+from tools.testing.virtmcu_test_suite.conftest_core import coordinator_subprocess
+from tools.testing.virtmcu_test_suite.constants import VirtmcuBinary
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -204,9 +207,6 @@ async def test_coordinator_fast_node_race(zenoh_router: str, zenoh_session: zeno
     receives 'start', without the coordinator dropping it due to a race condition with
     QuantumBarrier.reset().
     """
-    from tools.testing.virtmcu_test_suite.artifact_resolver import get_rust_binary_path
-    from tools.testing.virtmcu_test_suite.conftest_core import coordinator_subprocess
-
     s = zenoh_session
     done_topic = "sim/coord/0/done"
     start_topic = "sim/clock/start/0"
@@ -231,22 +231,10 @@ async def test_coordinator_fast_node_race(zenoh_router: str, zenoh_session: zeno
 
     try:
         async with coordinator_subprocess(
-            binary=get_rust_binary_path("zenoh_coordinator"),
-            args=["--pdes", "--nodes", "1", "--connect", zenoh_router],
+            binary=get_rust_binary_path(VirtmcuBinary.DETERMINISTIC_COORDINATOR),
+            args=["--nodes", "1", "--connect", zenoh_router],
             zenoh_session=s,
         ):
-            # Coordinator-state probe (separate from the routing barrier the
-            # framework already ran): wait for the queryable handler to be live.
-            async def _probe_ready() -> None:
-                while True:
-                    replies = await asyncio.to_thread(
-                        lambda: list(s.get("sim/coordinator/ready_probe", timeout=0.5))
-                    )
-                    if replies and any(getattr(r, "ok", None) is not None for r in replies):
-                        return
-
-            await asyncio.wait_for(_probe_ready(), timeout=5.0)
-
             # Kickstart the coordinator
             s.put("sim/coord/0/done", (1).to_bytes(8, "little"))
 

@@ -28,6 +28,7 @@ import zenoh
 
 from tools import vproto
 from tools.testing.virtmcu_test_suite.artifact_resolver import resolve_rust_binary
+from tools.testing.virtmcu_test_suite.constants import VirtmcuBinary
 from tools.testing.virtmcu_test_suite.process import AsyncManagedProcess
 
 if TYPE_CHECKING:
@@ -42,7 +43,7 @@ logger = logging.getLogger(__name__)
 BUILD_DIR = WORKSPACE_DIR / "target/release"
 
 try:
-    REPLAY_BIN = resolve_rust_binary("resd_replay")
+    REPLAY_BIN = resolve_rust_binary(VirtmcuBinary.RESD_REPLAY)
 except FileNotFoundError:
     # Allow test collection to proceed if binary is missing, test will fail later
     REPLAY_BIN = Path(WORKSPACE_DIR) / "target/release/resd_replay"
@@ -171,7 +172,7 @@ async def mujoco_bridge_process() -> AsyncGenerator[tuple[AsyncManagedProcess, P
     node_id = 42 + (os.getpid() % 1000)
     nu = 4
     nsensordata = 8
-    bridge_bin = resolve_rust_binary("mujoco_bridge")
+    bridge_bin = resolve_rust_binary(VirtmcuBinary.MUJOCO_BRIDGE)
     shm_path = Path("/") / "dev" / "shm" / f"virtmcu_mujoco_{node_id}"
 
     # Ensure no stale SHM exists

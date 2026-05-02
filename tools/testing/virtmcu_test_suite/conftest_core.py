@@ -20,6 +20,10 @@ from tools import vproto
 from tools.testing.env import WORKSPACE_DIR
 from tools.testing.qmp_bridge import QmpBridge
 from tools.testing.utils import get_time_multiplier, wait_for_file_creation, yield_now
+from tools.testing.virtmcu_test_suite.artifact_resolver import (
+    get_rust_binary_path,
+)
+from tools.testing.virtmcu_test_suite.constants import VirtmcuBinary
 
 if TYPE_CHECKING:
     pass
@@ -543,7 +547,7 @@ async def coordinator_subprocess(
     binary: str | Path,
     args: list[str],
     zenoh_session: zenoh.Session,
-    liveliness_topic: str = "sim/coordinator/liveliness",
+    liveliness_topic: str = "sim/coord/alive",
 ) -> AsyncGenerator[CoordinatorHandle]:
     """
     SOTA spawn-and-barrier helper for tests that drive a Rust coordinator
@@ -594,13 +598,12 @@ async def zenoh_coordinator(
 
     workspace_root = WORKSPACE_DIR
 
-    from tools.testing.virtmcu_test_suite.artifact_resolver import get_rust_binary_path
-
-    coord_bin = get_rust_binary_path("deterministic_coordinator")
+    coord_bin = get_rust_binary_path(VirtmcuBinary.DETERMINISTIC_COORDINATOR)
 
     # Use a lock to build once in parallel runs
     if not coord_bin.exists():
-        lock_file = workspace_root / "tools/deterministic_coordinator/build.lock"
+        coord_source = VirtmcuBinary.DETERMINISTIC_COORDINATOR.source_path(workspace_root)
+        lock_file = coord_source / "build.lock"
         import fcntl
 
         def _blocking_build() -> None:
@@ -612,23 +615,20 @@ async def zenoh_coordinator(
                     cargo_cmd = shutil.which("cargo") or "cargo"
                     subprocess.run(
                         [cargo_cmd, "build", "--release"],
-                        cwd=(workspace_root / "tools/deterministic_coordinator"),
+                        cwd=coord_source,
                         check=True,
                     )
 
         await asyncio.to_thread(_blocking_build)
 
         # Refresh location after build
-        coord_bin = get_rust_binary_path("deterministic_coordinator")
+        coord_bin = get_rust_binary_path(VirtmcuBinary.DETERMINISTIC_COORDINATOR)
 
-    pdes = getattr(request, "param", {}).get("pdes", False)
     topology = getattr(request, "param", {}).get("topology", None)
 
-    logger.info(f"Starting Zenoh Coordinator (nodes={n_nodes}, pdes={pdes}, topology={topology}) connecting to {zenoh_router}...")
+    logger.info(f"Starting Zenoh Coordinator (nodes={n_nodes}, topology={topology}) connecting to {zenoh_router}...")
 
     cmd = [str(coord_bin), "--connect", zenoh_router, "--nodes", str(n_nodes)]
-    if pdes:
-        cmd.append("--pdes")
     if topology:
         cmd.extend(["--topology", str(topology)])
 

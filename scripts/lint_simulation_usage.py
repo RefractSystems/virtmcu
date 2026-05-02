@@ -30,6 +30,21 @@ def lint_file(path: Path) -> list[str]:
             elif isinstance(node.func, ast.Attribute):
                 name = node.func.attr
 
+            if name in ("get_rust_binary_path", "resolve_rust_binary"):
+                # Ensure the first argument is a VirtmcuBinary attribute access, not a string
+                if node.args and isinstance(node.args[0], ast.Constant):
+                    arg_val = node.args[0].value
+                    if isinstance(arg_val, str):
+                        # Check for LINT_EXCEPTION: hardcoded_binary
+                        with path.open("r") as f:
+                            lines = f.readlines()
+                            if node.lineno <= len(lines) and "LINT_EXCEPTION: hardcoded_binary" not in lines[node.lineno-1]:
+                                violations.append(
+                                    f"{path}:{node.lineno}: Banned hardcoded string '{arg_val}' in {name}(). "
+                                    "Use the `VirtmcuBinary` enum from `tools.testing.virtmcu_test_suite.constants` instead. "
+                                    "If this is for unit testing the resolver itself, use '# LINT_EXCEPTION: hardcoded_binary'."
+                                )
+
             if name == "ensure_session_routing":
                 # Hard-ban in tests. The framework handles routing for firmware
                 # tests (`simulation` fixture) and for direct-coordinator tests

@@ -18,6 +18,7 @@ import pytest
 
 from tools.testing.virtmcu_test_suite.artifact_resolver import resolve_rust_binary
 from tools.testing.virtmcu_test_suite.conftest_core import coordinator_subprocess
+from tools.testing.virtmcu_test_suite.constants import VirtmcuBinary
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 @pytest.mark.asyncio
 async def test_pcap_determinism(zenoh_router: str, zenoh_session: zenoh.Session, tmp_path: Path) -> None:
-    coordinator_bin = resolve_rust_binary("deterministic_coordinator")
+    coordinator_bin = resolve_rust_binary(VirtmcuBinary.DETERMINISTIC_COORDINATOR)
 
     world_yaml = tmp_path / "world.yaml"
     world_yaml.write_text("""
