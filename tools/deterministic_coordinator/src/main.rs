@@ -70,6 +70,7 @@ fn decode_batch(payload: &[u8]) -> Vec<CoordMessage> {
                         sequence_number: seq,
                         protocol: parse_protocol(proto),
                         payload: data,
+                        base_topic: None,
                     });
                 }
             }
@@ -96,7 +97,7 @@ fn encode_message(msg: &CoordMessage) -> Vec<u8> {
     buf
 }
 
-fn parse_legacy_topic(topic: &str) -> Option<(Protocol, u32)> {
+fn parse_legacy_topic(topic: &str) -> Option<(Protocol, u32, String)> {
     let parts: Vec<&str> = topic.split('/').collect();
     if parts.len() < 3 {
         return None;
@@ -110,37 +111,43 @@ fn parse_legacy_topic(topic: &str) -> Option<(Protocol, u32)> {
     if topic.contains("eth") {
         if let Some(nid_str) = parts.iter().rev().nth(1) {
             if let Ok(nid) = nid_str.parse::<u32>() {
-                return Some((Protocol::Ethernet, nid));
+                let base = parts[..parts.len() - 2].join("/");
+                return Some((Protocol::Ethernet, nid, base));
             }
         }
     } else if topic.contains("uart") {
         if let Some(nid_str) = parts.iter().rev().nth(1) {
             if let Ok(nid) = nid_str.parse::<u32>() {
-                return Some((Protocol::Uart, nid));
+                let base = parts[..parts.len() - 2].join("/");
+                return Some((Protocol::Uart, nid, base));
             }
         }
     } else if topic.contains("can") {
         if let Some(nid_str) = parts.iter().rev().nth(1) {
             if let Ok(nid) = nid_str.parse::<u32>() {
-                return Some((Protocol::CanFd, nid));
+                let base = parts[..parts.len() - 2].join("/");
+                return Some((Protocol::CanFd, nid, base));
             }
         }
     } else if topic.contains("lin") {
         if let Some(nid_str) = parts.iter().rev().nth(1) {
             if let Ok(nid) = nid_str.parse::<u32>() {
-                return Some((Protocol::Lin, nid));
+                let base = parts[..parts.len() - 2].join("/");
+                return Some((Protocol::Lin, nid, base));
             }
         }
     } else if topic.contains("spi") {
         if let Some(nid_str) = parts.iter().rev().nth(1) {
             if let Ok(nid) = nid_str.parse::<u32>() {
-                return Some((Protocol::Spi, nid));
+                let base = parts[..parts.len() - 2].join("/");
+                return Some((Protocol::Spi, nid, base));
             }
         }
     } else if topic.contains("rf") {
         if let Some(nid_str) = parts.iter().rev().nth(1) {
             if let Ok(nid) = nid_str.parse::<u32>() {
-                return Some((Protocol::Rf802154, nid));
+                let base = parts[..parts.len() - 2].join("/");
+                return Some((Protocol::Rf802154, nid, base));
             }
         }
     }
@@ -258,7 +265,7 @@ async fn run_deterministic_coordinator(
                                 .append(&mut msgs);
                         }
                     }
-                } else if let Some((proto, node_id)) = parse_legacy_topic(topic) {
+                } else if let Some((proto, node_id, base)) = parse_legacy_topic(topic) {
                     let payload = sample.payload().to_bytes();
                     if let Some(header) = ZenohFrameHeader::unpack_slice(&payload) {
                         let data_start = virtmcu_api::ZENOH_FRAME_HEADER_SIZE;
@@ -274,6 +281,7 @@ async fn run_deterministic_coordinator(
                                     sequence_number: header.sequence_number(),
                                     protocol: proto,
                                     payload: data,
+                                    base_topic: Some(base),
                                 });
                         }
                     }
@@ -377,17 +385,25 @@ async fn run_deterministic_coordinator(
                                         let _ = session.put(&rx_topic, out_payload).await;
 
                                         // Legacy delivery
-                                        let legacy_prefix = match msg.protocol {
-                                            Protocol::Ethernet => "sim/eth/frame",
-                                            Protocol::Uart => "virtmcu/uart",
-                                            Protocol::CanFd => "sim/can",
-                                            Protocol::Lin => "sim/lin",
-                                            Protocol::Spi => "sim/spi",
-                                            Protocol::Rf802154 => "sim/rf/ieee802154",
-                                            _ => "sim/unknown",
+                                        let legacy_prefix = if let Some(base) = &msg.base_topic {
+                                            base.clone()
+                                        } else {
+                                            match msg.protocol {
+                                                Protocol::Ethernet => "sim/eth/frame".to_owned(),
+                                                Protocol::Uart => "virtmcu/uart".to_owned(),
+                                                Protocol::CanFd => "sim/can".to_owned(),
+                                                Protocol::Lin => "sim/lin".to_owned(),
+                                                Protocol::Spi => "sim/spi".to_owned(),
+                                                Protocol::Rf802154 => "sim/rf/ieee802154".to_owned(),
+                                                _ => "sim/unknown".to_owned(),
+                                            }
                                         };
                                         let legacy_rx_topic = format!("{}/{}/rx", legacy_prefix, target_node);
-                                        let legacy_payload = virtmcu_api::encode_frame(msg.delivery_vtime_ns, msg.sequence_number, &msg.payload);
+                                        let legacy_payload = virtmcu_api::encode_frame(
+                                            msg.delivery_vtime_ns,
+                                            msg.sequence_number,
+                                            &msg.payload,
+                                        );
                                         let _ = session.put(&legacy_rx_topic, legacy_payload).await;
                                     }
                                 }
